@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS rules_capacites (
     code VARCHAR(50) UNIQUE NOT NULL,
     name VARCHAR(150) NOT NULL,
     action_type VARCHAR(20) CHECK (action_type IN ('limitee', 'action', 'passive')),
+    est_sort BOOLEAN NOT NULL DEFAULT false,
     description TEXT NOT NULL,
     effect JSONB
 );

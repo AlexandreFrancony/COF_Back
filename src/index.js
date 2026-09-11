@@ -8,6 +8,10 @@ import pool, { testConnection } from './db/pool.js';
 import { apiLimiter, authLimiter } from './middleware/rateLimiter.js';
 
 import authRouter from './routes/auth.js';
+import campaignsRouter from './routes/campaigns.js';
+import invitesRouter from './routes/invites.js';
+import charactersRouter from './routes/characters.js';
+import rulesRouter from './routes/rules.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -57,6 +61,10 @@ app.get('/health', async (req, res) => {
 });
 
 app.use('/auth', authLimiter, authRouter);
+app.use('/campaigns', campaignsRouter);
+app.use('/', invitesRouter); // mounts /campaigns/:id/invites and /invites/:token
+app.use('/', charactersRouter); // mounts /campaigns/:id/characters and /characters/:id
+app.use('/rules', rulesRouter);
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
