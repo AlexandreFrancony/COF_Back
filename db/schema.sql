@@ -38,7 +38,12 @@ CREATE TABLE IF NOT EXISTS rules_familles (
     id SERIAL PRIMARY KEY,
     code VARCHAR(50) UNIQUE NOT NULL,
     name VARCHAR(100) NOT NULL,
-    description TEXT
+    description TEXT,
+    pv_base INTEGER,
+    dr_die VARCHAR(10),
+    dr_bonus INTEGER NOT NULL DEFAULT 0,
+    pc_bonus INTEGER NOT NULL DEFAULT 0,
+    caracteristique_commune VARCHAR(10)
 );
 
 CREATE TABLE IF NOT EXISTS rules_profils (
@@ -47,7 +52,6 @@ CREATE TABLE IF NOT EXISTS rules_profils (
     code VARCHAR(50) UNIQUE NOT NULL,
     name VARCHAR(100) NOT NULL,
     caracteristiques_prioritaires TEXT[] NOT NULL,
-    pv_formula JSONB NOT NULL,
     description TEXT
 );
 
@@ -63,10 +67,11 @@ CREATE TABLE IF NOT EXISTS rules_voies (
     id SERIAL PRIMARY KEY,
     code VARCHAR(50) UNIQUE NOT NULL,
     name VARCHAR(150) NOT NULL,
-    type VARCHAR(20) NOT NULL CHECK (type IN ('profil', 'peuple', 'prestige')),
+    type VARCHAR(20) NOT NULL CHECK (type IN ('profil', 'peuple', 'prestige', 'custom')),
     profil_id INTEGER REFERENCES rules_profils(id),
     peuple_id INTEGER REFERENCES rules_peuples(id),
-    niveau_prestige_requis INTEGER
+    niveau_prestige_requis INTEGER,
+    origine_pj VARCHAR(100)
 );
 
 CREATE TABLE IF NOT EXISTS rules_capacites (
