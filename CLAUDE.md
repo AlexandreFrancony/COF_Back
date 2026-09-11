@@ -51,7 +51,7 @@ Les tables `rules_familles`, `rules_profils`, `rules_peuples`, `rules_voies`, `r
 | DATABASE_URL | Connexion PostgreSQL | - |
 | JWT_SECRET | Secret de signature JWT | - |
 | JWT_EXPIRES_IN | Durée de validité du token | 30d |
-| FRONTEND_URL | URL du frontend (CORS prod) | https://mj.francony.fr |
+| FRONTEND_URL | URL du frontend (CORS prod) | https://jdr.francony.fr |
 
 ## Commandes
 

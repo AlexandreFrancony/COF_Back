@@ -29,7 +29,7 @@ app.use(helmet());
 
 const corsOptions = {
   origin: process.env.NODE_ENV === 'production'
-    ? process.env.FRONTEND_URL || 'https://mj.francony.fr'
+    ? process.env.FRONTEND_URL || 'https://jdr.francony.fr'
     : true,
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
