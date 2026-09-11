@@ -1,0 +1,99 @@
+import 'dotenv/config';
+
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+
+import pool, { testConnection } from './db/pool.js';
+import { apiLimiter, authLimiter } from './middleware/rateLimiter.js';
+
+import authRouter from './routes/auth.js';
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+if (!process.env.DATABASE_URL) {
+  console.error('❌ ERROR: DATABASE_URL is not defined in .env');
+  process.exit(1);
+}
+
+if (!process.env.JWT_SECRET) {
+  console.error('❌ ERROR: JWT_SECRET is not defined in .env');
+  process.exit(1);
+}
+
+// Trust reverse proxy (Pangolin/Traefik) for correct client IP detection
+app.set('trust proxy', 1);
+
+app.use(helmet());
+
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production'
+    ? process.env.FRONTEND_URL || 'https://mj.francony.fr'
+    : true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+app.use(cors(corsOptions));
+
+app.use(express.json());
+app.use('/api', apiLimiter);
+
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+    next();
+  });
+}
+
+app.get('/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', database: 'connected' });
+  } catch (error) {
+    res.status(503).json({ status: 'error', database: 'disconnected' });
+  }
+});
+
+app.use('/auth', authLimiter, authRouter);
+
+app.use((req, res) => {
+  res.status(404).json({ error: 'Route not found' });
+});
+
+app.use((err, req, res, next) => {
+  console.error('❌ Unhandled error:', err.message);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+async function startServer() {
+  try {
+    const connected = await testConnection();
+    if (!connected) {
+      console.error('❌ Cannot start server without database connection');
+      process.exit(1);
+    }
+
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`\n🎲 COF API running on port ${PORT}`);
+      console.log(`   Environment: ${process.env.NODE_ENV || 'development'}\n`);
+    });
+  } catch (error) {
+    console.error('❌ Server startup failed:', error.message);
+    process.exit(1);
+  }
+}
+
+process.on('SIGTERM', async () => {
+  console.log('\n🛑 Shutting down...');
+  await pool.end();
+  process.exit(0);
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('❌ Unhandled Rejection:', error.message);
+  process.exit(1);
+});
+
+startServer();
