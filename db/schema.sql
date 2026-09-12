@@ -170,6 +170,14 @@ CREATE TABLE IF NOT EXISTS board_states (
     background_type VARCHAR(10) NOT NULL DEFAULT 'image' CHECK (background_type IN ('image', 'video')),
     grid_visible BOOLEAN NOT NULL DEFAULT false,
     grid_size INTEGER NOT NULL DEFAULT 20, -- number of grid columns across the board width
+    -- Camera: the window of the full scene actually shown on the projector, independent from
+    -- what the GM sees (always the full scene). x/y is the window's center (% of the scene);
+    -- width is its width as % of the scene width. Since the scene and the projector output
+    -- share the same 16:9 ratio, a window of width w% is exactly w% tall too (no correction
+    -- needed, unlike board_zones' shapes) — see BoardCanvas.jsx's crop transform.
+    camera_x REAL NOT NULL DEFAULT 50,
+    camera_y REAL NOT NULL DEFAULT 50,
+    camera_width REAL NOT NULL DEFAULT 100,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

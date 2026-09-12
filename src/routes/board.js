@@ -151,10 +151,17 @@ router.get('/board-stream/:campaignId', async (req, res) => {
 
 /**
  * PATCH /campaigns/:campaignId/board — GM only.
- * Body: { background_url, background_type, grid_visible, grid_size }
+ * Body: { background_url, background_type, grid_visible, grid_size,
+ *         camera_x, camera_y, camera_width, camera_width_delta }
  * background_type ('image' | 'video') tells the frontend how to render background_url —
  * a video plays fullscreen/looped/muted behind the grid/zones/tokens instead of being used
  * as a CSS background-image (p.ex. pour une ambiance sonore/visuelle hors combat).
+ * camera_x/camera_y/camera_width define the window of the full scene the projector actually
+ * shows (the GM's own view always shows the full scene) — x/y are sent as absolute values on
+ * drag-end (same pattern as tokens/zones), camera_width_delta is applied atomically in SQL on
+ * a zoom +/- click (same reasoning as board_zones' size_delta: a client-computed absolute value
+ * would drop clicks fired before the previous response updates local state). Clamped to keep
+ * the window a sane size and roughly on-scene; exact edge-of-scene clamping is left to the GM.
  */
 router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
   try {
@@ -162,15 +169,29 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
     if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
 
     await getOrCreateBoard(req.params.campaignId);
-    const { background_url, background_type, grid_visible, grid_size } = req.body;
+    const {
+      background_url, background_type, grid_visible, grid_size,
+      camera_x, camera_y, camera_width, camera_width_delta,
+    } = req.body;
     await pool.query(
       `UPDATE board_states SET
          background_url = COALESCE($1, background_url),
          background_type = COALESCE($2, background_type),
          grid_visible = COALESCE($3, grid_visible),
-         grid_size = COALESCE($4, grid_size)
-       WHERE campaign_id = $5`,
-      [background_url, background_type, grid_visible, grid_size, req.params.campaignId]
+         grid_size = COALESCE($4, grid_size),
+         camera_x = LEAST(100, GREATEST(0, COALESCE($5, camera_x))),
+         camera_y = LEAST(100, GREATEST(0, COALESCE($6, camera_y))),
+         camera_width = CASE
+           WHEN $7::real IS NOT NULL THEN LEAST(100, GREATEST(10, $7))
+           WHEN $8::real IS NOT NULL THEN LEAST(100, GREATEST(10, camera_width + $8))
+           ELSE camera_width
+         END
+       WHERE campaign_id = $9`,
+      [
+        background_url, background_type, grid_visible, grid_size,
+        camera_x, camera_y, camera_width, camera_width_delta,
+        req.params.campaignId,
+      ]
     );
 
     const board = await getFullBoard(req.params.campaignId);
