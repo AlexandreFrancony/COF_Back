@@ -113,7 +113,25 @@ router.get('/characters/:id', async (req, res) => {
       [character.id]
     );
 
-    res.json({ ...character, voies: voies.rows });
+    const capacites = voies.rows.length > 0
+      ? await pool.query(
+          `SELECT c.* FROM rules_capacites c
+           JOIN character_voies cv ON cv.voie_id = c.voie_id AND c.rang <= cv.rang
+           WHERE cv.character_id = $1
+           ORDER BY c.voie_id, c.rang`,
+          [character.id]
+        )
+      : { rows: [] };
+
+    const capacitesByVoie = {};
+    for (const cap of capacites.rows) {
+      (capacitesByVoie[cap.voie_id] ??= []).push(cap);
+    }
+
+    res.json({
+      ...character,
+      voies: voies.rows.map((v) => ({ ...v, capacites: capacitesByVoie[v.voie_id] || [] })),
+    });
   } catch (error) {
     console.error('Error GET /characters/:id:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
