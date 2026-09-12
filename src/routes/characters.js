@@ -16,15 +16,50 @@ async function canAccessCharacter(character, user) {
   return campaign.rows[0]?.gm_id === user.id;
 }
 
+// Shared shape for every route that returns a character: the raw row plus its voies, each
+// with the capacités owned up to their current rang. Used consistently everywhere (not just
+// GET) so a frontend handler can never accidentally drop the voies by using a mutation
+// endpoint's response directly instead of re-fetching.
+async function getCharacterWithVoies(characterId) {
+  const result = await pool.query('SELECT * FROM characters WHERE id = $1', [characterId]);
+  const character = result.rows[0];
+  if (!character) return null;
+
+  const voies = await pool.query(
+    `SELECT cv.rang, cv.rang_cap, cv.obtained_at_level, v.id AS voie_id, v.code, v.name, v.type
+     FROM character_voies cv JOIN rules_voies v ON v.id = cv.voie_id
+     WHERE cv.character_id = $1`,
+    [characterId]
+  );
+
+  const capacites = voies.rows.length > 0
+    ? await pool.query(
+        `SELECT c.* FROM rules_capacites c
+         JOIN character_voies cv ON cv.voie_id = c.voie_id AND c.rang <= cv.rang
+         WHERE cv.character_id = $1
+         ORDER BY c.voie_id, c.rang`,
+        [characterId]
+      )
+    : { rows: [] };
+
+  const capacitesByVoie = {};
+  for (const cap of capacites.rows) {
+    (capacitesByVoie[cap.voie_id] ??= []).push(cap);
+  }
+
+  return { ...character, voies: voies.rows.map((v) => ({ ...v, capacites: capacitesByVoie[v.voie_id] || [] })) };
+}
+
 /**
  * Recomputes pv_max/pm_max/points_chance/de_recuperation/defense/initiative/valeurs_attaque
  * for a character and persists them, carrying forward the *gain* into pv_current/pm_current
  * (leveling up or learning a spell heals/refills by the amount gained, per the rulebook).
+ * Always returns the character with its nested voies (see getCharacterWithVoies).
  */
 async function recomputeAndPersist(characterId) {
   const charResult = await pool.query('SELECT * FROM characters WHERE id = $1', [characterId]);
   const character = charResult.rows[0];
-  if (!character?.profil_id) return character;
+  if (!character?.profil_id) return getCharacterWithVoies(characterId);
 
   const profil = await pool.query(
     `SELECT p.*, f.pv_base, f.dr_die, f.dr_bonus, f.pc_bonus
@@ -32,7 +67,7 @@ async function recomputeAndPersist(characterId) {
      WHERE p.id = $1`,
     [character.profil_id]
   );
-  if (profil.rows.length === 0) return character;
+  if (profil.rows.length === 0) return getCharacterWithVoies(characterId);
 
   const sortsCount = await pool.query(
     `SELECT count(*) FROM character_voies cv
@@ -46,14 +81,13 @@ async function recomputeAndPersist(characterId) {
   const pvGain = Math.max(0, derived.pv_max - character.pv_max);
   const pmGain = Math.max(0, derived.pm_max - character.pm_max);
 
-  const result = await pool.query(
+  await pool.query(
     `UPDATE characters SET
        pv_max = $1, pm_max = $2, points_chance = $3, de_recuperation = $4,
        defense = $5, initiative = $6, valeurs_attaque = $7,
        pv_current = LEAST($1, pv_current + $8),
        pm_current = LEAST($2, pm_current + $9)
-     WHERE id = $10
-     RETURNING *`,
+     WHERE id = $10`,
     [
       derived.pv_max, derived.pm_max, derived.points_chance, derived.de_recuperation,
       derived.defense, derived.initiative, JSON.stringify(derived.valeurs_attaque),
@@ -61,7 +95,7 @@ async function recomputeAndPersist(characterId) {
     ]
   );
 
-  return result.rows[0];
+  return getCharacterWithVoies(characterId);
 }
 
 // Records which famille a just-purchased voie belongs to, for this level-up cycle's PV
@@ -181,42 +215,15 @@ router.post('/campaigns/:campaignId/characters', requireGm, async (req, res) => 
  */
 router.get('/characters/:id', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM characters WHERE id = $1', [req.params.id]);
-    if (result.rows.length === 0) {
+    const character = await getCharacterWithVoies(req.params.id);
+    if (!character) {
       return res.status(404).json({ error: 'Personnage non trouvé' });
     }
-
-    const character = result.rows[0];
     if (!(await canAccessCharacter(character, req.user))) {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
-    const voies = await pool.query(
-      `SELECT cv.rang, cv.rang_cap, cv.obtained_at_level, v.id AS voie_id, v.code, v.name, v.type
-       FROM character_voies cv JOIN rules_voies v ON v.id = cv.voie_id
-       WHERE cv.character_id = $1`,
-      [character.id]
-    );
-
-    const capacites = voies.rows.length > 0
-      ? await pool.query(
-          `SELECT c.* FROM rules_capacites c
-           JOIN character_voies cv ON cv.voie_id = c.voie_id AND c.rang <= cv.rang
-           WHERE cv.character_id = $1
-           ORDER BY c.voie_id, c.rang`,
-          [character.id]
-        )
-      : { rows: [] };
-
-    const capacitesByVoie = {};
-    for (const cap of capacites.rows) {
-      (capacitesByVoie[cap.voie_id] ??= []).push(cap);
-    }
-
-    res.json({
-      ...character,
-      voies: voies.rows.map((v) => ({ ...v, capacites: capacitesByVoie[v.voie_id] || [] })),
-    });
+    res.json(character);
   } catch (error) {
     console.error('Error GET /characters/:id:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -409,8 +416,8 @@ router.post('/characters/:id/voies', async (req, res) => {
         `${character.name} acquiert ${voieName}`);
     }
 
-    await recomputeAndPersist(req.params.id); // a spell-granting voie changes pm_max
-    res.status(201).json(result.rows[0]);
+    const updated = await recomputeAndPersist(req.params.id); // a spell-granting voie changes pm_max
+    res.status(201).json(updated);
   } catch (error) {
     console.error('Error POST /characters/:id/voies:', error.message);
     res.status(500).json({ error: 'Erreur lors de l\'ajout de la voie' });
