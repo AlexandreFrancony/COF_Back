@@ -47,6 +47,8 @@ Format `{"bonus": [...], "malus": [...]}` — le joueur choisit une caractérist
 
   `rules_voies.niveau_prestige_requis` stocke le niveau du rang 4 (le point d'ouverture) ; les rangs suivants suivent la table ci-dessus (+2 niveaux par rang) sauf indication contraire dans la description.
 
+  **Implémentation** : `type='prestige'` (52 voies extraites, `profil_id`/`peuple_id` NULL — accessibles à n'importe quel profil). L'acquisition initiale octroie directement le **rang 4** (coût 2 points, comme un rang 3+) plutôt que le rang 1 ; les rangs suivants passent par le même endpoint générique de montée de rang que les voies normales (la table de niveaux requis est identique). Verrouillé côté backend : `character.level >= niveau_prestige_requis`, et une seule voie de prestige possédée à la fois par personnage.
+
 - **Changement d'orientation** : à chaque niveau, oublier 1 capacité (2 si INT ≥ +2) et la remplacer en suivant les règles normales de progression. Impossible d'oublier : la capacité de voie de peuple (auto/gratuite), les 2 capacités de rang 1 du profil principal acquises au niveau 1, ou un rang intermédiaire sans avoir d'abord oublié les rangs au-dessus (pas de "trous" dans une voie).
 
 ## Profils hybrides (chapitre 9, p.176-179)

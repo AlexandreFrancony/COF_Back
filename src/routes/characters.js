@@ -320,6 +320,8 @@ router.patch('/characters/:id', async (req, res) => {
  * A type='profil' voie whose profil_id differs from the character's own is a profil hybride
  * pick (p.176) — allowed only while at least one of the principal profil's 5 voies is still
  * completely untouched.
+ * A type='prestige' voie opens directly at rang 4 for 2 points, gated on
+ * niveau_prestige_requis and limited to one per career (p.39).
  */
 router.post('/characters/:id/voies', async (req, res) => {
   try {
@@ -336,18 +338,20 @@ router.post('/characters/:id/voies', async (req, res) => {
     if (!voie_id || !obtained_at_level) {
       return res.status(400).json({ error: 'voie_id et obtained_at_level requis' });
     }
-    if (spend_points && character.capacity_points_available < 1) {
-      return res.status(400).json({ error: 'Pas assez de points de capacité (1 requis)' });
-    }
 
     let voieName;
-    if (spend_points) {
-      const voieRow = await pool.query('SELECT name, type, profil_id FROM rules_voies WHERE id = $1', [voie_id]);
-      voieName = voieRow.rows[0]?.name;
-      const isForeignProfilVoie = voieRow.rows[0]?.type === 'profil'
-        && voieRow.rows[0].profil_id
-        && voieRow.rows[0].profil_id !== character.profil_id;
+    let grantedRang = !spend_points && rang === 2 ? 2 : 1;
+    let cost = 1;
 
+    if (spend_points) {
+      const voieRow = await pool.query(
+        'SELECT name, type, profil_id, niveau_prestige_requis FROM rules_voies WHERE id = $1',
+        [voie_id]
+      );
+      const voie = voieRow.rows[0];
+      voieName = voie?.name;
+
+      const isForeignProfilVoie = voie?.type === 'profil' && voie.profil_id && voie.profil_id !== character.profil_id;
       if (isForeignProfilVoie) {
         const ownProfilCount = await pool.query(
           `SELECT count(*) FROM character_voies cv JOIN rules_voies v ON v.id = cv.voie_id
@@ -360,9 +364,31 @@ router.post('/characters/:id/voies', async (req, res) => {
           });
         }
       }
-    }
 
-    const grantedRang = !spend_points && rang === 2 ? 2 : 1;
+      // A prestige voie opens directly at rang 4 (not rang 1) and costs the rang 3+ price
+      // (2 points) — one per career (p.39), gated on the character's own niveau_prestige_requis.
+      if (voie?.type === 'prestige') {
+        if (character.level < voie.niveau_prestige_requis) {
+          return res.status(400).json({
+            error: `Niveau ${voie.niveau_prestige_requis} requis pour cette voie de prestige`,
+          });
+        }
+        const existingPrestige = await pool.query(
+          `SELECT 1 FROM character_voies cv JOIN rules_voies v ON v.id = cv.voie_id
+           WHERE cv.character_id = $1 AND v.type = 'prestige'`,
+          [req.params.id]
+        );
+        if (existingPrestige.rows.length > 0) {
+          return res.status(400).json({ error: 'Une seule voie de prestige est possible par carrière' });
+        }
+        grantedRang = 4;
+        cost = 2;
+      }
+
+      if (character.capacity_points_available < cost) {
+        return res.status(400).json({ error: `Pas assez de points de capacité (${cost} requis)` });
+      }
+    }
 
     const result = await pool.query(
       `INSERT INTO character_voies (character_id, voie_id, rang, rang_cap, obtained_at_level)
@@ -374,15 +400,13 @@ router.post('/characters/:id/voies', async (req, res) => {
 
     if (spend_points && result.rows.length > 0) {
       await pool.query(
-        'UPDATE characters SET capacity_points_available = capacity_points_available - 1 WHERE id = $1',
-        [req.params.id]
+        'UPDATE characters SET capacity_points_available = capacity_points_available - $1 WHERE id = $2',
+        [cost, req.params.id]
       );
       await recordVoieFamilyForLeveling(req.params.id, voie_id);
       await maybeFinalizeLevelPv(req.params.id);
-      if (result.rows.length > 0) {
-        await logEvent(character.campaign_id, character.id, 'voie_added',
-          `${character.name} acquiert ${voieName}`);
-      }
+      await logEvent(character.campaign_id, character.id, 'voie_added',
+        `${character.name} acquiert ${voieName}`);
     }
 
     await recomputeAndPersist(req.params.id); // a spell-granting voie changes pm_max
