@@ -174,10 +174,12 @@ router.patch('/characters/:id', async (req, res) => {
 
 /**
  * POST /characters/:id/voies
- * Assigns a voie at rang 1 to a character.
- * Body: { voie_id, obtained_at_level, spend_points }
+ * Assigns a voie to a character.
+ * Body: { voie_id, obtained_at_level, spend_points, rang }
  * spend_points (default true) costs 1 capacity point — pass false for the
  * 3 free voies granted automatically at character creation (level 1).
+ * rang (default 1) may only be 2 when spend_points is false — the mage
+ * exception where one of the two profil voies starts at rang 2 (p.29/39).
  */
 router.post('/characters/:id/voies', async (req, res) => {
   try {
@@ -190,20 +192,21 @@ router.post('/characters/:id/voies', async (req, res) => {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
-    const { voie_id, obtained_at_level, spend_points = true } = req.body;
+    const { voie_id, obtained_at_level, spend_points = true, rang = 1 } = req.body;
     if (!voie_id || !obtained_at_level) {
       return res.status(400).json({ error: 'voie_id et obtained_at_level requis' });
     }
     if (spend_points && character.capacity_points_available < 1) {
       return res.status(400).json({ error: 'Pas assez de points de capacité (1 requis)' });
     }
+    const grantedRang = !spend_points && rang === 2 ? 2 : 1;
 
     const result = await pool.query(
       `INSERT INTO character_voies (character_id, voie_id, rang, obtained_at_level)
-       VALUES ($1, $2, 1, $3)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (character_id, voie_id) DO NOTHING
        RETURNING *`,
-      [req.params.id, voie_id, obtained_at_level]
+      [req.params.id, voie_id, grantedRang, obtained_at_level]
     );
 
     if (spend_points && result.rows.length > 0) {
