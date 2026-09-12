@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS characters (
     de_recuperation VARCHAR(10),
     defense INTEGER NOT NULL DEFAULT 0,
     initiative INTEGER NOT NULL DEFAULT 0,
+    capacity_points_available INTEGER NOT NULL DEFAULT 0,
     valeurs_attaque JSONB NOT NULL DEFAULT '{}',
     equipement JSONB NOT NULL DEFAULT '[]',
     notes TEXT,
