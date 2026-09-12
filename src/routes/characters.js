@@ -160,4 +160,64 @@ router.patch('/characters/:id', async (req, res) => {
   }
 });
 
+/**
+ * POST /characters/:id/voies
+ * Assigns a voie (rang 1) to a character — used during creation and level-up.
+ * Body: { voie_id, obtained_at_level }
+ */
+router.post('/characters/:id/voies', async (req, res) => {
+  try {
+    const existing = await pool.query('SELECT * FROM characters WHERE id = $1', [req.params.id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Personnage non trouvé' });
+    }
+    if (!(await canAccessCharacter(existing.rows[0], req.user))) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    const { voie_id, obtained_at_level } = req.body;
+    if (!voie_id || !obtained_at_level) {
+      return res.status(400).json({ error: 'voie_id et obtained_at_level requis' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO character_voies (character_id, voie_id, rang, obtained_at_level)
+       VALUES ($1, $2, 1, $3)
+       ON CONFLICT (character_id, voie_id) DO NOTHING
+       RETURNING *`,
+      [req.params.id, voie_id, obtained_at_level]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error POST /characters/:id/voies:', error.message);
+    res.status(500).json({ error: 'Erreur lors de l\'ajout de la voie' });
+  }
+});
+
+/**
+ * DELETE /characters/:id/voies/:voieId
+ */
+router.delete('/characters/:id/voies/:voieId', async (req, res) => {
+  try {
+    const existing = await pool.query('SELECT * FROM characters WHERE id = $1', [req.params.id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Personnage non trouvé' });
+    }
+    if (!(await canAccessCharacter(existing.rows[0], req.user))) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    await pool.query(
+      'DELETE FROM character_voies WHERE character_id = $1 AND voie_id = $2',
+      [req.params.id, req.params.voieId]
+    );
+
+    res.json({ message: 'Voie retirée' });
+  } catch (error) {
+    console.error('Error DELETE /characters/:id/voies/:voieId:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 export default router;
