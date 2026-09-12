@@ -120,6 +120,16 @@ CREATE TABLE IF NOT EXISTS characters (
     valeurs_attaque JSONB NOT NULL DEFAULT '{}',
     equipement JSONB NOT NULL DEFAULT '[]',
     notes TEXT,
+    -- PV ledger (replaces the old single-family closed formula so a profil hybride can mix
+    -- families across levels, p.176-177): pv_max = pv_body_total + CON*level.
+    pv_body_total INTEGER NOT NULL DEFAULT 0,
+    pv_pending_half BOOLEAN NOT NULL DEFAULT false, -- alternating floor/ceil carry for half-PV levels
+    level_up_families TEXT[] NOT NULL DEFAULT '{}', -- famille codes touched since the last level-up, reset once spent
+    -- Orphan capacity point bonuses (p.39) — additive on top of the derived stat, since a raw
+    -- override on pv_max/pm_max/etc. gets silently clobbered by the next recompute otherwise.
+    pc_bonus_orphan INTEGER NOT NULL DEFAULT 0,
+    dr_bonus_orphan INTEGER NOT NULL DEFAULT 0,
+    pm_bonus_orphan INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

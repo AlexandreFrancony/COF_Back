@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import pool from '../db/pool.js';
 import { authenticateToken } from '../middleware/auth.js';
-import { computeDerivedStats, NIVEAU_REQUIS_PAR_RANG } from '../services/characterCalculations.js';
+import {
+  computeDerivedStats, computePvBodyGain, seedPvBodyTotal, NIVEAU_REQUIS_PAR_RANG,
+} from '../services/characterCalculations.js';
 
 const router = Router();
 router.use(authenticateToken);
@@ -38,12 +40,7 @@ async function recomputeAndPersist(characterId) {
     [characterId]
   );
 
-  const derived = computeDerivedStats(
-    profil.rows[0],
-    character.caracteristiques,
-    character.level,
-    parseInt(sortsCount.rows[0].count, 10)
-  );
+  const derived = computeDerivedStats(profil.rows[0], character, parseInt(sortsCount.rows[0].count, 10));
 
   const pvGain = Math.max(0, derived.pv_max - character.pv_max);
   const pmGain = Math.max(0, derived.pm_max - character.pm_max);
@@ -64,6 +61,62 @@ async function recomputeAndPersist(characterId) {
   );
 
   return result.rows[0];
+}
+
+// Records which famille a just-purchased voie belongs to, for this level-up cycle's PV
+// averaging (p.176). Peuple/mage/custom/prestige-without-profil voies don't carry a famille
+// and are silently excluded from the mix — only type='profil' voies with a profil_id count.
+async function recordVoieFamilyForLeveling(characterId, voieId) {
+  const voie = await pool.query(
+    `SELECT f.code AS famille_code FROM rules_voies v
+     LEFT JOIN rules_profils p ON p.id = v.profil_id
+     LEFT JOIN rules_familles f ON f.id = p.famille_id
+     WHERE v.id = $1`,
+    [voieId]
+  );
+  const familleCode = voie.rows[0]?.famille_code;
+  if (!familleCode) return;
+
+  await pool.query(
+    'UPDATE characters SET level_up_families = array_append(level_up_families, $1) WHERE id = $2',
+    [familleCode, characterId]
+  );
+}
+
+// Once every capacity point from a level-up has been spent, settles that level's PV gain
+// from the distinct familles touched (p.176-177) into the pv_body_total ledger.
+async function maybeFinalizeLevelPv(characterId) {
+  const result = await pool.query(
+    'SELECT profil_id, capacity_points_available, level_up_families, pv_pending_half, pv_body_total FROM characters WHERE id = $1',
+    [characterId]
+  );
+  const character = result.rows[0];
+  if (character.capacity_points_available > 0) return;
+
+  let familleCodes = [...new Set(character.level_up_families)];
+  if (familleCodes.length === 0) {
+    // Nothing profil-tied was purchased this level (e.g. only a peuple/mage/custom voie rang) —
+    // fall back to the principal profil's own family rather than silently losing this level's PV.
+    const ownFamille = await pool.query(
+      'SELECT f.code FROM rules_profils p JOIN rules_familles f ON f.id = p.famille_id WHERE p.id = $1',
+      [character.profil_id]
+    );
+    familleCodes = ownFamille.rows.map((f) => f.code);
+  }
+  if (familleCodes.length === 0) return; // no profil at all — shouldn't happen post-creation
+
+  const familles = await pool.query(
+    'SELECT pv_base FROM rules_familles WHERE code = ANY($1)',
+    [familleCodes]
+  );
+  const { gain, pendingHalf } = computePvBodyGain(familles.rows.map((f) => f.pv_base), character.pv_pending_half);
+
+  await pool.query(
+    `UPDATE characters SET
+       pv_body_total = $1, pv_pending_half = $2, level_up_families = '{}'
+     WHERE id = $3`,
+    [character.pv_body_total + gain, pendingHalf, characterId]
+  );
 }
 
 /**
@@ -161,6 +214,11 @@ router.patch('/characters/:id', async (req, res) => {
       equipement, notes, pv_current, pm_current,
     } = req.body;
 
+    // Character-creation finalize: profil_id goes from unset to set. Seed the PV ledger here
+    // since pv_body_total otherwise never gets its level-1 baseline (2x the principal profil's
+    // family pv_base, p.28) — a hybrid pick can only ever happen on a later level-up.
+    const isInitialCreation = !character.profil_id && profil_id;
+
     await pool.query(
       `UPDATE characters SET
          name = COALESCE($1, name),
@@ -182,6 +240,17 @@ router.patch('/characters/:id', async (req, res) => {
       ]
     );
 
+    if (isInitialCreation) {
+      const famille = await pool.query(
+        `SELECT f.pv_base FROM rules_profils p JOIN rules_familles f ON f.id = p.famille_id WHERE p.id = $1`,
+        [profil_id]
+      );
+      await pool.query(
+        'UPDATE characters SET pv_body_total = $1 WHERE id = $2',
+        [seedPvBodyTotal(famille.rows[0].pv_base), req.params.id]
+      );
+    }
+
     const updated = await recomputeAndPersist(req.params.id);
     res.json(updated);
   } catch (error) {
@@ -202,6 +271,9 @@ router.patch('/characters/:id', async (req, res) => {
  * rang_cap freezes the voie at that rang forever — used for a peuple voie
  * once its owner replaces it with the voie du mage (p.60): the character
  * keeps the rang-1 capacité but can never raise it further.
+ * A type='profil' voie whose profil_id differs from the character's own is a profil hybride
+ * pick (p.176) — allowed only while at least one of the principal profil's 5 voies is still
+ * completely untouched.
  */
 router.post('/characters/:id/voies', async (req, res) => {
   try {
@@ -221,6 +293,27 @@ router.post('/characters/:id/voies', async (req, res) => {
     if (spend_points && character.capacity_points_available < 1) {
       return res.status(400).json({ error: 'Pas assez de points de capacité (1 requis)' });
     }
+
+    if (spend_points) {
+      const voieRow = await pool.query('SELECT type, profil_id FROM rules_voies WHERE id = $1', [voie_id]);
+      const isForeignProfilVoie = voieRow.rows[0]?.type === 'profil'
+        && voieRow.rows[0].profil_id
+        && voieRow.rows[0].profil_id !== character.profil_id;
+
+      if (isForeignProfilVoie) {
+        const ownProfilCount = await pool.query(
+          `SELECT count(*) FROM character_voies cv JOIN rules_voies v ON v.id = cv.voie_id
+           WHERE cv.character_id = $1 AND v.profil_id = $2`,
+          [req.params.id, character.profil_id]
+        );
+        if (parseInt(ownProfilCount.rows[0].count, 10) >= 5) {
+          return res.status(400).json({
+            error: 'Profil hybride impossible : les 5 voies du profil principal ont déjà été entamées',
+          });
+        }
+      }
+    }
+
     const grantedRang = !spend_points && rang === 2 ? 2 : 1;
 
     const result = await pool.query(
@@ -236,6 +329,8 @@ router.post('/characters/:id/voies', async (req, res) => {
         'UPDATE characters SET capacity_points_available = capacity_points_available - 1 WHERE id = $1',
         [req.params.id]
       );
+      await recordVoieFamilyForLeveling(req.params.id, voie_id);
+      await maybeFinalizeLevelPv(req.params.id);
     }
 
     await recomputeAndPersist(req.params.id); // a spell-granting voie changes pm_max
@@ -298,6 +393,8 @@ router.patch('/characters/:id/voies/:voieId', async (req, res) => {
       'UPDATE characters SET capacity_points_available = capacity_points_available - $1 WHERE id = $2',
       [cost, req.params.id]
     );
+    await recordVoieFamilyForLeveling(req.params.id, req.params.voieId);
+    await maybeFinalizeLevelPv(req.params.id);
 
     const updated = await recomputeAndPersist(req.params.id); // a newly-unlocked sort changes pm_max
     res.json(updated);
@@ -328,7 +425,8 @@ router.post('/characters/:id/level-up', async (req, res) => {
     }
 
     await pool.query(
-      `UPDATE characters SET level = level + 1, capacity_points_available = capacity_points_available + 2
+      `UPDATE characters SET level = level + 1, capacity_points_available = capacity_points_available + 2,
+         level_up_families = '{}'
        WHERE id = $1`,
       [req.params.id]
     );
@@ -361,32 +459,32 @@ router.post('/characters/:id/orphan-exchange', async (req, res) => {
     }
 
     const { choice } = req.body;
+    // Bonuses go through the same additive ledger columns recomputeAndPersist reads, rather
+    // than overriding pv_max/pm_max/etc. directly — a direct override gets silently clobbered
+    // by the next recompute triggered by any other action (new voie, rang increase...).
     const updates = { capacity_points_available: character.capacity_points_available - 1 };
 
     if (choice === 'pc') {
-      updates.points_chance = character.points_chance + 1;
+      updates.pc_bonus_orphan = character.pc_bonus_orphan + 1;
     } else if (choice === 'dr') {
-      const match = character.de_recuperation?.match(/^(\d+)(d\d+)$/);
-      if (!match) return res.status(400).json({ error: 'Dé de récupération invalide' });
-      updates.de_recuperation = `${parseInt(match[1], 10) + 1}${match[2]}`;
+      updates.dr_bonus_orphan = character.dr_bonus_orphan + 1;
     } else if (choice === 'pv') {
-      updates.pv_max = character.pv_max + 2;
-      updates.pv_current = character.pv_current + 2;
+      updates.pv_body_total = character.pv_body_total + 2;
     } else if (choice === 'pm') {
-      updates.pm_max = character.pm_max + 2;
-      updates.pm_current = character.pm_current + 2;
+      updates.pm_bonus_orphan = character.pm_bonus_orphan + 2;
     } else {
       return res.status(400).json({ error: "choice doit être 'pc', 'dr', 'pv' ou 'pm'" });
     }
 
     const keys = Object.keys(updates);
     const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
-    const result = await pool.query(
-      `UPDATE characters SET ${setClause} WHERE id = $${keys.length + 1} RETURNING *`,
+    await pool.query(
+      `UPDATE characters SET ${setClause} WHERE id = $${keys.length + 1}`,
       [...keys.map((k) => updates[k]), req.params.id]
     );
 
-    res.json(result.rows[0]);
+    const updated = await recomputeAndPersist(req.params.id); // carries the PV/PM gain into current, like a level-up
+    res.json(updated);
   } catch (error) {
     console.error('Error POST /characters/:id/orphan-exchange:', error.message);
     res.status(500).json({ error: 'Erreur lors de l\'échange du point orphelin' });

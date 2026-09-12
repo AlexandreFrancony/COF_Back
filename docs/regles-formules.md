@@ -6,7 +6,7 @@ Source : COF2-RèglesBasiques.pdf, p.22-32 (création) et p.38-43 (progression).
 
 ## Création de personnage (niveau 1)
 
-- **PV** = `(2 × rules_familles.pv_base) + CON`
+- **PV** = `(2 × rules_familles.pv_base) + CON` — stocké comme amorce du grand livre `pv_body_total` (voir "Profils hybrides" plus bas), la formule fermée ne s'applique qu'au niveau 1
 - **DR (dé de récupération)** = `[2 + CON] + rules_familles.dr_bonus`, dé = `rules_familles.dr_die`. Cas particulier : CON = -2 → 0 DR (pas de récupération rapide possible, seulement complète, et le dé n'obtient jamais le résultat max).
 - **PC (points de chance)** = `[2 + CHA] + rules_familles.pc_bonus`
 - **PM (points de mana)** = `nombre de capacités de type sort (marquées *) connues + VOL` — 0 si aucun sort. Recalculé à chaque nouveau sort appris (jamais de gain automatique au niveau).
@@ -32,7 +32,7 @@ Format `{"bonus": [...], "malus": [...]}` — le joueur choisit une caractérist
 
 - **+2 points de capacité** par niveau, à dépenser immédiatement (jamais de réserve). Coût : 1 point pour le rang 2, 2 points pour les rangs 3+.
 - **Point de capacité orphelin** (1 point non dépensable car il ne reste que des capacités à 2 points) : échangeable contre **1 PC**, **1 DR**, **2 PV**, ou **2 PM**.
-- **Nouvelle voie** : possible dès le niveau 2, parmi les 5 voies du profil principal (accessible à tout niveau) ou hors profil (nécessite un événement de jeu validé par le MJ, sauf profil hybride).
+- **Nouvelle voie** : possible dès le niveau 2, parmi les 5 voies du profil principal (accessible à tout niveau) ou hors profil (profil hybride, voir plus bas — l'app ne demande pas de justification narrative, c'est au MJ de la faire respecter à la table).
 - **Dés évolutifs (d4°)** — table universelle :
 
   | Niveau | 1-5 | 6-8 | 9-11 | 12-14 | 15+ |
@@ -48,6 +48,17 @@ Format `{"bonus": [...], "malus": [...]}` — le joueur choisit une caractérist
   `rules_voies.niveau_prestige_requis` stocke le niveau du rang 4 (le point d'ouverture) ; les rangs suivants suivent la table ci-dessus (+2 niveaux par rang) sauf indication contraire dans la description.
 
 - **Changement d'orientation** : à chaque niveau, oublier 1 capacité (2 si INT ≥ +2) et la remplacer en suivant les règles normales de progression. Impossible d'oublier : la capacité de voie de peuple (auto/gratuite), les 2 capacités de rang 1 du profil principal acquises au niveau 1, ou un rang intermédiaire sans avoir d'abord oublié les rangs au-dessus (pas de "trous" dans une voie).
+
+## Profils hybrides (chapitre 9, p.176-179)
+
+- **Condition** : un personnage ne peut choisir une voie hors de son profil principal que tant qu'il reste au moins une des 5 voies de ce profil dans laquelle il n'a **encore rien investi**. Dès que les 5 sont entamées (ne serait-ce qu'au rang 1), plus aucun nouveau profil hybride n'est possible — implémenté via `character_voies` : compte des voies dont `voie.profil_id = character.profil_id`, doit être < 5.
+- **PV** : ne suit plus la formule fermée `pv_base*(niveau+1)+CON*niveau` dès qu'un personnage devient hybride, car `pv_base` dépend de la famille — remplacé par un **grand livre** (`characters.pv_body_total`), incrémenté à chaque fois que tous les points de capacité d'un niveau ont été dépensés :
+  - Amorcé à la création à `2 × pv_base` de la famille du profil principal (le niveau 1 n'est jamais hybride).
+  - À chaque niveau, la famille de chaque voie de type `profil` achetée est enregistrée (`characters.level_up_families`) ; une fois les points du niveau épuisés, le gain de PV de ce niveau = `pv_base` de la famille si une seule famille a été touchée, sinon la **moyenne** des familles distinctes touchées (arrondie au demi-point inférieur la première fois, supérieur la fois suivante, en alternance — `characters.pv_pending_half`).
+  - Une voie de peuple, de mage ou personnalisée (`profil_id` NULL) ne compte pour aucune famille ; si un niveau entier ne touche que ce type de voie, on retombe sur la famille du profil principal par défaut (cas non couvert explicitement par le livre).
+  - `pv_max = pv_body_total + CON × niveau` — le CON reste appliqué rétroactivement à chaque niveau comme avant.
+- **DR et PC** viennent toujours uniquement du profil principal, jamais moyennés (p.176 : "Il permet de déterminer le DR et certains avantages ... PC, DR ou capacité de rang 2").
+- **Hors scope volontairement** : restrictions croisées d'armes/armures et surcoût en PM pour lancer un sort en armure non autorisée (p.177-178) — nécessiteraient un référentiel armes/armures qui n'existe pas dans l'app ; laissé à la gestion manuelle du MJ.
 
 ## PM et sorts appris par une autre voie ("poupées russes")
 
