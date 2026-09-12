@@ -153,6 +153,8 @@ CREATE TABLE IF NOT EXISTS board_states (
     id SERIAL PRIMARY KEY,
     campaign_id INTEGER UNIQUE NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
     background_url TEXT,
+    grid_visible BOOLEAN NOT NULL DEFAULT false,
+    grid_size INTEGER NOT NULL DEFAULT 20, -- number of grid columns across the board width
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -126,7 +126,7 @@ router.get('/board-stream/:campaignId', async (req, res) => {
 });
 
 /**
- * PATCH /campaigns/:campaignId/board — GM only. Body: { background_url }
+ * PATCH /campaigns/:campaignId/board — GM only. Body: { background_url, grid_visible, grid_size }
  */
 router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
   try {
@@ -134,10 +134,14 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
     if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
 
     await getOrCreateBoard(req.params.campaignId);
-    const { background_url } = req.body;
+    const { background_url, grid_visible, grid_size } = req.body;
     await pool.query(
-      'UPDATE board_states SET background_url = COALESCE($1, background_url) WHERE campaign_id = $2',
-      [background_url, req.params.campaignId]
+      `UPDATE board_states SET
+         background_url = COALESCE($1, background_url),
+         grid_visible = COALESCE($2, grid_visible),
+         grid_size = COALESCE($3, grid_size)
+       WHERE campaign_id = $4`,
+      [background_url, grid_visible, grid_size, req.params.campaignId]
     );
 
     const board = await getFullBoard(req.params.campaignId);
