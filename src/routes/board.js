@@ -305,7 +305,7 @@ router.patch('/board/zones/:zoneId', requireGm, async (req, res) => {
          y = COALESCE($4, y),
          size = GREATEST(1, size + COALESCE($5, 0)),
          width = GREATEST(1, width + COALESCE($6, 0)),
-         rotation = MOD(rotation + COALESCE($7, 0) + 360, 360),
+         rotation = MOD((rotation + COALESCE($7, 0) + 360)::numeric, 360),
          visible_to_players = COALESCE($8, visible_to_players)
        WHERE id = $9`,
       [label, color, x, y, visible_to_players, size_delta, width_delta, rotation_delta, req.params.zoneId]
