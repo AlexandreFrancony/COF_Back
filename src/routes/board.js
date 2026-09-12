@@ -289,19 +289,26 @@ router.patch('/board/zones/:zoneId', requireGm, async (req, res) => {
     const campaign = await findAccessibleCampaign(campaign_id, req.user);
     if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
 
-    const { label, color, x, y, size, width, rotation, visible_to_players } = req.body;
+    const {
+      label, color, x, y, visible_to_players,
+      size_delta, width_delta, rotation_delta,
+    } = req.body;
+    // size/width/rotation move by a server-applied delta rather than an absolute value the
+    // client computed — a GM clicking +/- rapidly fires several requests before the first
+    // response (and its updated selectedZone state) comes back, so a client-computed absolute
+    // value silently drops in-flight clicks. GREATEST/MOD keep the accumulation atomic in SQL.
     await pool.query(
       `UPDATE board_zones SET
          label = COALESCE($1, label),
          color = COALESCE($2, color),
          x = COALESCE($3, x),
          y = COALESCE($4, y),
-         size = COALESCE($5, size),
-         width = COALESCE($6, width),
-         rotation = COALESCE($7, rotation),
+         size = GREATEST(1, size + COALESCE($5, 0)),
+         width = GREATEST(1, width + COALESCE($6, 0)),
+         rotation = MOD(rotation + COALESCE($7, 0) + 360, 360),
          visible_to_players = COALESCE($8, visible_to_players)
        WHERE id = $9`,
-      [label, color, x, y, size, width, rotation, visible_to_players, req.params.zoneId]
+      [label, color, x, y, visible_to_players, size_delta, width_delta, rotation_delta, req.params.zoneId]
     );
 
     const fullBoard = await getFullBoard(campaign_id);
