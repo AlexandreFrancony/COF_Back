@@ -8,7 +8,13 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js"
   },
-  "keywords": ["cof", "jdr", "gm-tool", "api", "express"],
+  "keywords": [
+    "cof",
+    "jdr",
+    "gm-tool",
+    "api",
+    "express"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -19,6 +25,7 @@
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.0",
     "pg": "^8.13.0"
   }
 }

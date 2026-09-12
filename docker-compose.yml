@@ -16,6 +16,10 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-30d}
       FRONTEND_URL: ${FRONTEND_URL:-https://jdr.francony.fr}
+      UPLOADS_DIR: /app/uploads
+
+    volumes:
+      - cof_uploads:/app/uploads
 
     deploy:
       resources:
@@ -29,6 +33,9 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  cof_uploads:
 
 networks:
   default:

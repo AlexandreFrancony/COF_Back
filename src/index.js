@@ -1,5 +1,6 @@
 import 'dotenv/config';
 
+import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -12,6 +13,7 @@ import campaignsRouter from './routes/campaigns.js';
 import invitesRouter from './routes/invites.js';
 import charactersRouter from './routes/characters.js';
 import rulesRouter from './routes/rules.js';
+import boardRouter from './routes/board.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -43,6 +45,7 @@ app.use(cors(corsOptions));
 
 app.use(express.json());
 app.use('/api', apiLimiter);
+app.use('/uploads', express.static(process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads')));
 
 if (process.env.NODE_ENV !== 'production') {
   app.use((req, res, next) => {
@@ -65,6 +68,7 @@ app.use('/campaigns', campaignsRouter);
 app.use('/', invitesRouter); // mounts /campaigns/:id/invites and /invites/:token
 app.use('/', charactersRouter); // mounts /campaigns/:id/characters and /characters/:id
 app.use('/rules', rulesRouter);
+app.use('/', boardRouter); // mounts /campaigns/:id/board and /board/tokens/:id
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });

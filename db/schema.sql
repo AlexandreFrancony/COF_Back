@@ -144,6 +144,30 @@ CREATE TABLE IF NOT EXISTS campaign_invites (
     accepted_at TIMESTAMP
 );
 
+-- ============================================================================
+-- LIVE BOARD (phase 2) — one active board per campaign, GM-controlled tokens
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS board_states (
+    id SERIAL PRIMARY KEY,
+    campaign_id INTEGER UNIQUE NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    background_url TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS board_tokens (
+    id SERIAL PRIMARY KEY,
+    board_state_id INTEGER NOT NULL REFERENCES board_states(id) ON DELETE CASCADE,
+    character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+    label VARCHAR(100) NOT NULL,
+    image_url TEXT,
+    color VARCHAR(20) NOT NULL DEFAULT '#c65d3b',
+    x REAL NOT NULL DEFAULT 50,
+    y REAL NOT NULL DEFAULT 50,
+    visible_to_players BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -155,5 +179,11 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS trigger_characters_updated_at ON characters;
 CREATE TRIGGER trigger_characters_updated_at
     BEFORE UPDATE ON characters
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at();
+
+DROP TRIGGER IF EXISTS trigger_board_states_updated_at ON board_states;
+CREATE TRIGGER trigger_board_states_updated_at
+    BEFORE UPDATE ON board_states
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();
