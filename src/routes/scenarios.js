@@ -3,7 +3,12 @@ import pool from '../db/pool.js';
 import { authenticateToken, requireGm } from '../middleware/auth.js';
 
 const router = Router();
-router.use(authenticateToken, requireGm);
+// requireGm is applied per-route (not blanket) — this router is mounted at '/' alongside
+// others (events, board...), and a blanket router.use(requireGm) here would 403 a player's
+// requests to THOSE routers too, since Express runs it for every request reaching this router
+// regardless of whether one of ITS OWN routes matches (learned the hard way: it silently
+// broke GET /campaigns/:id/events for players once eventsRouter was mounted after this one).
+router.use(authenticateToken);
 
 // Scenario notes are GM prep material (can contain spoilers) — GM-only, never exposed to players.
 
@@ -15,7 +20,7 @@ async function ownedCampaign(campaignId, gmId) {
 /**
  * GET /campaigns/:campaignId/scenarios
  */
-router.get('/campaigns/:campaignId/scenarios', async (req, res) => {
+router.get('/campaigns/:campaignId/scenarios', requireGm, async (req, res) => {
   try {
     if (!(await ownedCampaign(req.params.campaignId, req.user.id))) {
       return res.status(404).json({ error: 'Campagne non trouvée' });
@@ -36,7 +41,7 @@ router.get('/campaigns/:campaignId/scenarios', async (req, res) => {
  * POST /campaigns/:campaignId/scenarios
  * Body: { name, notes }
  */
-router.post('/campaigns/:campaignId/scenarios', async (req, res) => {
+router.post('/campaigns/:campaignId/scenarios', requireGm, async (req, res) => {
   try {
     if (!(await ownedCampaign(req.params.campaignId, req.user.id))) {
       return res.status(404).json({ error: 'Campagne non trouvée' });
@@ -60,7 +65,7 @@ router.post('/campaigns/:campaignId/scenarios', async (req, res) => {
  * PATCH /scenarios/:id
  * Body: { name, notes }
  */
-router.patch('/scenarios/:id', async (req, res) => {
+router.patch('/scenarios/:id', requireGm, async (req, res) => {
   try {
     const { name, notes } = req.body;
     const result = await pool.query(
@@ -83,7 +88,7 @@ router.patch('/scenarios/:id', async (req, res) => {
 /**
  * DELETE /scenarios/:id
  */
-router.delete('/scenarios/:id', async (req, res) => {
+router.delete('/scenarios/:id', requireGm, async (req, res) => {
   try {
     const result = await pool.query(
       `DELETE FROM campaign_scenarios s
