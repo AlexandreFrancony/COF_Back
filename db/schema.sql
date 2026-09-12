@@ -131,6 +131,9 @@ CREATE TABLE IF NOT EXISTS characters (
     pc_bonus_orphan INTEGER NOT NULL DEFAULT 0,
     dr_bonus_orphan INTEGER NOT NULL DEFAULT 0,
     pm_bonus_orphan INTEGER NOT NULL DEFAULT 0,
+    -- Changement d'orientation (p.42-43): +1 per level-up (+2 if INT>=+2), consumed by
+    -- forgetting a capacité to refund its point cost and spend it elsewhere.
+    forgets_available INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

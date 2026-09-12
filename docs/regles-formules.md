@@ -62,6 +62,14 @@ Format `{"bonus": [...], "malus": [...]}` — le joueur choisit une caractérist
 - **DR et PC** viennent toujours uniquement du profil principal, jamais moyennés (p.176 : "Il permet de déterminer le DR et certains avantages ... PC, DR ou capacité de rang 2").
 - **Hors scope volontairement** : restrictions croisées d'armes/armures et surcoût en PM pour lancer un sort en armure non autorisée (p.177-178) — nécessiteraient un référentiel armes/armures qui n'existe pas dans l'app ; laissé à la gestion manuelle du MJ.
 
+## Changement d'orientation (p.42-43)
+
+- À chaque montée de niveau : +1 jeton "oubli" (`characters.forgets_available`), +2 si INT ≥ +2.
+- Oublier une capacité = retirer le rang le plus haut actuellement possédé d'une voie (jamais un rang arbitraire, ce qui empêche naturellement les "trous" dans une voie) et récupérer son coût en points de capacité (1 pour rang ≤ 2, 2 pour rang ≥ 3 — même barème que l'acquisition) pour le dépenser ailleurs.
+- Protégé : toute voie acquise gratuitement à la création (`obtained_at_level = 1`) ne peut pas descendre sous le rang 1 — "impossible d'oublier sa jeunesse" (les 2 capacités de rang 1 du profil principal + la voie de peuple).
+- **Simplification acceptée** : la capacité de rang 2 offerte au mage à la création (bonus mage) est aussi `obtained_at_level = 1` mais démarre à rang 2 sans qu'aucun point n'ait été payé — le garde-fou ci-dessus ne bloque qu'à partir du rang 1, donc l'oublier rembourse un point qui n'a jamais été dépensé. Cas rare et sans enjeu réel (application MJ, pas de compétitif) ; pas de colonne dédiée ajoutée pour le couvrir.
+- Ne recalcule pas rétroactivement le ledger de PV (`pv_body_total`) : les PV déjà gagnés à un niveau passé restent acquis même si la capacité qui a motivé leur famille est ensuite oubliée.
+
 ## PM et sorts appris par une autre voie ("poupées russes")
 
 Un sort obtenu via une capacité d'appel (ex: "choisissez une capacité de rang 1 d'une autre voie") rapporte quand même 1 PM et utilise le coût du rang habituel du sort. La caractéristique de magie utilisée est celle du profil d'origine du sort. Pas d'appel en cascade (une capacité d'appel ne peut pas elle-même être un appel).

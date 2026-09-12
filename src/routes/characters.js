@@ -504,11 +504,13 @@ router.post('/characters/:id/level-up', async (req, res) => {
       });
     }
 
+    // Changement d'orientation (p.42-43): +1 forget-and-replace token per level, +2 if INT>=+2.
+    const forgetsGained = character.caracteristiques.INT >= 2 ? 2 : 1;
     await pool.query(
       `UPDATE characters SET level = level + 1, capacity_points_available = capacity_points_available + 2,
-         level_up_families = '{}'
+         level_up_families = '{}', forgets_available = forgets_available + $2
        WHERE id = $1`,
-      [req.params.id]
+      [req.params.id, forgetsGained]
     );
 
     const updated = await recomputeAndPersist(req.params.id);
@@ -573,6 +575,81 @@ router.post('/characters/:id/orphan-exchange', async (req, res) => {
   } catch (error) {
     console.error('Error POST /characters/:id/orphan-exchange:', error.message);
     res.status(500).json({ error: 'Erreur lors de l\'échange du point orphelin' });
+  }
+});
+
+/**
+ * POST /characters/:id/voies/:voieId/forget
+ * "Changement d'orientation" (p.42-43): forgets the voie's current (highest) rang, refunding
+ * its point cost to spend elsewhere — enforces no holes in a voie automatically, since it
+ * always removes the top rang rather than an arbitrary one.
+ * Consumes 1 of the character's forgets_available (granted +1 per level, +2 if INT>=+2).
+ * Blocked below rang 1 for a voie granted for free at creation (obtained_at_level=1) — "il
+ * n'est pas possible d'oublier sa jeunesse". Known minor gap: the mage's bonus rang-2 grant at
+ * creation is also obtained_at_level=1 but starts at rang 2, not 1 — forgetting it down to
+ * rang 1 isn't blocked, refunding a point that was never actually spent. Accepted as a rare,
+ * low-stakes edge case rather than adding a column just to track each voie's starting rang.
+ */
+router.post('/characters/:id/voies/:voieId/forget', async (req, res) => {
+  try {
+    const existing = await pool.query('SELECT * FROM characters WHERE id = $1', [req.params.id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Personnage non trouvé' });
+    }
+    const character = existing.rows[0];
+    if (!(await canAccessCharacter(character, req.user))) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+    if (character.forgets_available < 1) {
+      return res.status(400).json({ error: 'Aucun changement d\'orientation disponible' });
+    }
+
+    const current = await pool.query(
+      'SELECT * FROM character_voies WHERE character_id = $1 AND voie_id = $2',
+      [req.params.id, req.params.voieId]
+    );
+    if (current.rows.length === 0) {
+      return res.status(404).json({ error: 'Le personnage ne possède pas cette voie' });
+    }
+    const cv = current.rows[0];
+
+    if (cv.obtained_at_level === 1 && cv.rang <= 1) {
+      return res.status(400).json({
+        error: 'Impossible d\'oublier une capacité acquise gratuitement à la création',
+      });
+    }
+
+    const voieRow = await pool.query('SELECT name FROM rules_voies WHERE id = $1', [req.params.voieId]);
+    const refund = cv.rang <= 2 ? 1 : 2;
+    const newRang = cv.rang - 1;
+
+    if (newRang <= 0) {
+      await pool.query(
+        'DELETE FROM character_voies WHERE character_id = $1 AND voie_id = $2',
+        [req.params.id, req.params.voieId]
+      );
+    } else {
+      await pool.query(
+        'UPDATE character_voies SET rang = $1 WHERE character_id = $2 AND voie_id = $3',
+        [newRang, req.params.id, req.params.voieId]
+      );
+    }
+
+    await pool.query(
+      `UPDATE characters SET
+         forgets_available = forgets_available - 1,
+         capacity_points_available = capacity_points_available + $1
+       WHERE id = $2`,
+      [refund, req.params.id]
+    );
+
+    const updated = await recomputeAndPersist(req.params.id); // losing a sort-granting capacité changes pm_max
+    await logEvent(character.campaign_id, character.id, 'voie_forgotten',
+      `${character.name} oublie ${voieRow.rows[0]?.name} (rang ${cv.rang}) — +${refund} point${refund > 1 ? 's' : ''} de capacité`);
+    res.json(updated);
+  } catch (error) {
+    console.error('Error POST /characters/:id/voies/:voieId/forget:', error.message);
+    res.status(500).json({ error: 'Erreur lors du changement d\'orientation' });
   }
 });
 
