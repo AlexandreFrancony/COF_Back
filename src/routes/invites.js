@@ -10,17 +10,15 @@ const BCRYPT_ROUNDS = 10;
 
 /**
  * POST /campaigns/:campaignId/invites
- * GM only. Creates a character shell + a pending invite for a player.
- * Body: { character_name, email? }
+ * GM only. Either creates a new character shell, or attaches an invite to an existing
+ * unclaimed one (e.g. a PJ the GM already built ahead of time to save the player setup time) —
+ * pass character_id instead of character_name for the latter.
+ * Body: { character_name?, character_id?, email? }
  */
 router.post('/campaigns/:campaignId/invites', authenticateToken, requireGm, async (req, res) => {
   try {
-    const { character_name, email } = req.body;
+    const { character_name, character_id, email } = req.body;
     const { campaignId } = req.params;
-
-    if (!character_name) {
-      return res.status(400).json({ error: 'Nom du personnage requis' });
-    }
 
     const campaign = await pool.query(
       'SELECT id FROM campaigns WHERE id = $1 AND gm_id = $2',
@@ -30,21 +28,43 @@ router.post('/campaigns/:campaignId/invites', authenticateToken, requireGm, asyn
       return res.status(404).json({ error: 'Campagne non trouvée' });
     }
 
-    const character = await pool.query(
-      'INSERT INTO characters (campaign_id, name) VALUES ($1, $2) RETURNING *',
-      [campaignId, character_name]
-    );
+    let character;
+    if (character_id) {
+      const existing = await pool.query(
+        'SELECT * FROM characters WHERE id = $1 AND campaign_id = $2 AND user_id IS NULL',
+        [character_id, campaignId]
+      );
+      if (existing.rows.length === 0) {
+        return res.status(404).json({ error: 'Personnage introuvable ou déjà associé à un joueur' });
+      }
+      const pendingInvite = await pool.query(
+        `SELECT id FROM campaign_invites WHERE character_id = $1 AND status = 'pending'`,
+        [character_id]
+      );
+      if (pendingInvite.rows.length > 0) {
+        return res.status(409).json({ error: 'Ce personnage a déjà une invitation en attente' });
+      }
+      character = existing.rows[0];
+    } else {
+      if (!character_name) {
+        return res.status(400).json({ error: 'Nom du personnage requis' });
+      }
+      character = (await pool.query(
+        'INSERT INTO characters (campaign_id, name) VALUES ($1, $2) RETURNING *',
+        [campaignId, character_name]
+      )).rows[0];
+    }
 
     const token = crypto.randomBytes(24).toString('hex');
     const invite = await pool.query(
       `INSERT INTO campaign_invites (campaign_id, character_id, token, email)
        VALUES ($1, $2, $3, $4) RETURNING *`,
-      [campaignId, character.rows[0].id, token, email || null]
+      [campaignId, character.id, token, email || null]
     );
 
     res.status(201).json({
       invite: invite.rows[0],
-      character: character.rows[0],
+      character,
       invite_url: `${process.env.FRONTEND_URL || 'https://jdr.francony.fr'}/invites/${token}`,
     });
   } catch (error) {

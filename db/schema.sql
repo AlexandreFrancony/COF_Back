@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS characters (
     campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     name VARCHAR(100) NOT NULL,
+    is_npc BOOLEAN NOT NULL DEFAULT false, -- GM-controlled, never claimed via an invite
     profil_id INTEGER REFERENCES rules_profils(id),
     peuple_id INTEGER REFERENCES rules_peuples(id),
     level INTEGER NOT NULL DEFAULT 1,

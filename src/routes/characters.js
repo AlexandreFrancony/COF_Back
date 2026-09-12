@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import pool from '../db/pool.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, requireGm } from '../middleware/auth.js';
 import {
   computeDerivedStats, computePvBodyGain, seedPvBodyTotal, NIVEAU_REQUIS_PAR_RANG,
 } from '../services/characterCalculations.js';
@@ -142,6 +142,37 @@ router.get('/campaigns/:campaignId/characters', async (req, res) => {
   } catch (error) {
     console.error('Error GET /campaigns/:campaignId/characters:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * POST /campaigns/:campaignId/characters
+ * GM only. Creates a bare character with no invite attached — either a PJ built ahead of
+ * time (an invite can be attached to it later via POST /campaigns/:id/invites with
+ * character_id) or a permanent PNJ that only the GM ever controls.
+ * Body: { name, is_npc }
+ */
+router.post('/campaigns/:campaignId/characters', requireGm, async (req, res) => {
+  try {
+    const campaign = await pool.query(
+      'SELECT id FROM campaigns WHERE id = $1 AND gm_id = $2',
+      [req.params.campaignId, req.user.id]
+    );
+    if (campaign.rows.length === 0) {
+      return res.status(404).json({ error: 'Campagne non trouvée' });
+    }
+
+    const { name, is_npc } = req.body;
+    if (!name) return res.status(400).json({ error: 'Nom du personnage requis' });
+
+    const result = await pool.query(
+      'INSERT INTO characters (campaign_id, name, is_npc) VALUES ($1, $2, $3) RETURNING *',
+      [req.params.campaignId, name, !!is_npc]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error POST /campaigns/:campaignId/characters:', error.message);
+    res.status(500).json({ error: 'Erreur lors de la création du personnage' });
   }
 });
 
@@ -542,6 +573,29 @@ router.delete('/characters/:id/voies/:voieId', async (req, res) => {
     res.json({ message: 'Voie retirée' });
   } catch (error) {
     console.error('Error DELETE /characters/:id/voies/:voieId:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * DELETE /characters/:id
+ * GM only. Removes a character (PNJ, an abandoned pre-built PJ, a mis-clicked creation...).
+ * Cascades to character_voies and campaign_invites; board_tokens keep the token, unlinked.
+ */
+router.delete('/characters/:id', requireGm, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `DELETE FROM characters ch USING campaigns c
+       WHERE ch.id = $1 AND ch.campaign_id = c.id AND c.gm_id = $2
+       RETURNING ch.id`,
+      [req.params.id, req.user.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Personnage non trouvé' });
+    }
+    res.json({ message: 'Personnage supprimé' });
+  } catch (error) {
+    console.error('Error DELETE /characters/:id:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
