@@ -62,10 +62,12 @@ async function resolveRole(campaignId, user) {
   return campaign.gm_id === user.id ? 'gm' : 'player';
 }
 
-// The SSE stream can't send an Authorization header (EventSource limitation), so it
-// authenticates via a query-string token instead of the shared authenticateToken middleware.
+// campaignsRouter is mounted at '/campaigns' with a blanket authenticateToken that runs for
+// every sub-path regardless of route match — so the SSE stream (which authenticates via a
+// query-string token, since EventSource can't set headers) must live outside that prefix,
+// otherwise campaignsRouter's header-based auth middleware 401s it before it ever gets here.
 router.use((req, res, next) => {
-  if (req.path.endsWith('/stream')) return next();
+  if (req.path.startsWith('/board-stream/')) return next();
   authenticateToken(req, res, next);
 });
 
@@ -86,9 +88,9 @@ router.get('/campaigns/:campaignId/board', async (req, res) => {
 });
 
 /**
- * GET /campaigns/:campaignId/board/stream — SSE, token passed as ?token=
+ * GET /board-stream/:campaignId — SSE, token passed as ?token=
  */
-router.get('/campaigns/:campaignId/board/stream', async (req, res) => {
+router.get('/board-stream/:campaignId', async (req, res) => {
   try {
     const token = req.query.token;
     if (!token) return res.status(401).end();
