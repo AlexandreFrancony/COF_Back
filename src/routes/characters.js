@@ -107,7 +107,7 @@ router.get('/characters/:id', async (req, res) => {
     }
 
     const voies = await pool.query(
-      `SELECT cv.rang, cv.obtained_at_level, v.id AS voie_id, v.code, v.name, v.type
+      `SELECT cv.rang, cv.rang_cap, cv.obtained_at_level, v.id AS voie_id, v.code, v.name, v.type
        FROM character_voies cv JOIN rules_voies v ON v.id = cv.voie_id
        WHERE cv.character_id = $1`,
       [character.id]
@@ -193,11 +193,15 @@ router.patch('/characters/:id', async (req, res) => {
 /**
  * POST /characters/:id/voies
  * Assigns a voie to a character.
- * Body: { voie_id, obtained_at_level, spend_points, rang }
+ * Body: { voie_id, obtained_at_level, spend_points, rang, rang_cap }
  * spend_points (default true) costs 1 capacity point — pass false for the
  * 3 free voies granted automatically at character creation (level 1).
  * rang (default 1) may only be 2 when spend_points is false — the mage
- * exception where one of the two profil voies starts at rang 2 (p.29/39).
+ * exception where one of the two profil voies (or the voie du mage) starts
+ * at rang 2 (p.29/39).
+ * rang_cap freezes the voie at that rang forever — used for a peuple voie
+ * once its owner replaces it with the voie du mage (p.60): the character
+ * keeps the rang-1 capacité but can never raise it further.
  */
 router.post('/characters/:id/voies', async (req, res) => {
   try {
@@ -210,7 +214,7 @@ router.post('/characters/:id/voies', async (req, res) => {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
-    const { voie_id, obtained_at_level, spend_points = true, rang = 1 } = req.body;
+    const { voie_id, obtained_at_level, spend_points = true, rang = 1, rang_cap = null } = req.body;
     if (!voie_id || !obtained_at_level) {
       return res.status(400).json({ error: 'voie_id et obtained_at_level requis' });
     }
@@ -220,11 +224,11 @@ router.post('/characters/:id/voies', async (req, res) => {
     const grantedRang = !spend_points && rang === 2 ? 2 : 1;
 
     const result = await pool.query(
-      `INSERT INTO character_voies (character_id, voie_id, rang, obtained_at_level)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO character_voies (character_id, voie_id, rang, rang_cap, obtained_at_level)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (character_id, voie_id) DO NOTHING
        RETURNING *`,
-      [req.params.id, voie_id, grantedRang, obtained_at_level]
+      [req.params.id, voie_id, grantedRang, rang_cap, obtained_at_level]
     );
 
     if (spend_points && result.rows.length > 0) {
@@ -265,6 +269,11 @@ router.patch('/characters/:id/voies/:voieId', async (req, res) => {
     );
     if (current.rows.length === 0) {
       return res.status(404).json({ error: 'Le personnage ne possède pas cette voie' });
+    }
+
+    const { rang_cap: rangCap } = current.rows[0];
+    if (rangCap !== null && current.rows[0].rang >= rangCap) {
+      return res.status(400).json({ error: 'Cette voie a été remplacée et ne peut plus progresser' });
     }
 
     const newRang = current.rows[0].rang + 1;

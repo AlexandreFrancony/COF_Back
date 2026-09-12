@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS rules_voies (
     id SERIAL PRIMARY KEY,
     code VARCHAR(50) UNIQUE NOT NULL,
     name VARCHAR(150) NOT NULL,
-    type VARCHAR(20) NOT NULL CHECK (type IN ('profil', 'peuple', 'prestige', 'custom')),
+    type VARCHAR(20) NOT NULL CHECK (type IN ('profil', 'peuple', 'prestige', 'custom', 'mage')),
     profil_id INTEGER REFERENCES rules_profils(id),
     peuple_id INTEGER REFERENCES rules_peuples(id),
     niveau_prestige_requis INTEGER,
@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS character_voies (
     character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
     voie_id INTEGER NOT NULL REFERENCES rules_voies(id),
     rang INTEGER NOT NULL DEFAULT 1,
+    rang_cap INTEGER, -- e.g. a peuple voie frozen at rang 1 after being replaced by the voie du mage
     obtained_at_level INTEGER NOT NULL,
     UNIQUE (character_id, voie_id)
 );
