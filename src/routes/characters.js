@@ -235,6 +235,10 @@ router.get('/characters/:id', async (req, res) => {
  * Updates character fields and recomputes derived stats (pv_max, pm_max, defense, etc.)
  * whenever profil, peuple, caracteristiques or level change.
  * Body: any subset of { name, profil_id, peuple_id, level, caracteristiques, equipement, notes, pv_current, pm_current }
+ * GM only, additionally: { capacity_points_available, forgets_available, pv_body_total,
+ * pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan } — raw ledger overrides for the GM editor
+ * (fixing a mis-built character, migrating an existing PJ's real state, etc.). Silently ignored
+ * for a non-GM caller rather than erroring, since a player's own PATCH calls never send them.
  */
 router.patch('/characters/:id', async (req, res) => {
   try {
@@ -247,11 +251,16 @@ router.patch('/characters/:id', async (req, res) => {
     if (!(await canAccessCharacter(character, req.user))) {
       return res.status(403).json({ error: 'Accès refusé' });
     }
+    const isGm = req.user.role === 'gm';
 
     const {
       name, profil_id, peuple_id, level, caracteristiques,
       equipement, notes, pv_current, pm_current,
     } = req.body;
+    const {
+      capacity_points_available, forgets_available, pv_body_total,
+      pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan,
+    } = isGm ? req.body : {};
 
     // Character-creation finalize: profil_id goes from unset to set. Seed the PV ledger here
     // since pv_body_total otherwise never gets its level-1 baseline (2x the principal profil's
@@ -268,13 +277,21 @@ router.patch('/characters/:id', async (req, res) => {
          equipement = COALESCE($6, equipement),
          notes = COALESCE($7, notes),
          pv_current = COALESCE($8, pv_current),
-         pm_current = COALESCE($9, pm_current)
-       WHERE id = $10`,
+         pm_current = COALESCE($9, pm_current),
+         capacity_points_available = COALESCE($10, capacity_points_available),
+         forgets_available = COALESCE($11, forgets_available),
+         pv_body_total = COALESCE($12, pv_body_total),
+         pc_bonus_orphan = COALESCE($13, pc_bonus_orphan),
+         dr_bonus_orphan = COALESCE($14, dr_bonus_orphan),
+         pm_bonus_orphan = COALESCE($15, pm_bonus_orphan)
+       WHERE id = $16`,
       [
         name, profil_id, peuple_id, level,
         caracteristiques ? JSON.stringify(caracteristiques) : null,
         equipement ? JSON.stringify(equipement) : null,
         notes, pv_current, pm_current,
+        capacity_points_available, forgets_available, pv_body_total,
+        pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan,
         req.params.id,
       ]
     );
@@ -346,8 +363,22 @@ router.post('/characters/:id/voies', async (req, res) => {
       return res.status(400).json({ error: 'voie_id et obtained_at_level requis' });
     }
 
+    const isGm = req.user.role === 'gm';
+    if (!spend_points) {
+      // Free grants are for the creation wizard (player, level 1 only — the mage bonus rang-2
+      // exception) or the GM editor's unrestricted overrides — never a way for a player to
+      // dodge the point economy once they've actually started playing.
+      const isOwnCreationWindow = character.user_id === req.user.id && character.level === 1;
+      if (!isGm && !isOwnCreationWindow) {
+        return res.status(403).json({ error: 'Voie gratuite non autorisée en dehors de la création initiale' });
+      }
+    }
+
     let voieName;
-    let grantedRang = !spend_points && rang === 2 ? 2 : 1;
+    // The GM editor can grant any rang directly; the player-facing creation flow stays
+    // restricted to rang 1 (or 2, the mage bonus exception).
+    let grantedRang = 1;
+    if (!spend_points) grantedRang = isGm ? rang : (rang === 2 ? 2 : 1);
     let cost = 1;
 
     if (spend_points) {
@@ -429,6 +460,9 @@ router.post('/characters/:id/voies', async (req, res) => {
  * Raises a voie's rang by 1. Body: {} (no fields needed, always +1 rang).
  * Enforces: prerequisite rang already held, niveau requirement, and cost
  * (1 point for rang 1-2, 2 points for rang 3+), taken from capacity_points_available.
+ * GM only: passing an explicit { rang } sets it directly instead — no cost, no niveau check,
+ * no PV-ledger/family side effects (a raw correction, not real in-play progression); a rang
+ * of 0 or less removes the voie entirely. For the GM editor.
  */
 router.patch('/characters/:id/voies/:voieId', async (req, res) => {
   try {
@@ -447,6 +481,22 @@ router.patch('/characters/:id/voies/:voieId', async (req, res) => {
     );
     if (current.rows.length === 0) {
       return res.status(404).json({ error: 'Le personnage ne possède pas cette voie' });
+    }
+
+    if (req.user.role === 'gm' && req.body.rang !== undefined) {
+      if (req.body.rang <= 0) {
+        await pool.query(
+          'DELETE FROM character_voies WHERE character_id = $1 AND voie_id = $2',
+          [req.params.id, req.params.voieId]
+        );
+      } else {
+        await pool.query(
+          'UPDATE character_voies SET rang = $1 WHERE character_id = $2 AND voie_id = $3',
+          [req.body.rang, req.params.id, req.params.voieId]
+        );
+      }
+      const updated = await recomputeAndPersist(req.params.id);
+      return res.json(updated);
     }
 
     const { rang_cap: rangCap } = current.rows[0];
