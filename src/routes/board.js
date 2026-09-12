@@ -308,7 +308,7 @@ router.patch('/board/zones/:zoneId', requireGm, async (req, res) => {
          rotation = MOD((rotation + COALESCE($7, 0) + 360)::numeric, 360),
          visible_to_players = COALESCE($8, visible_to_players)
        WHERE id = $9`,
-      [label, color, x, y, visible_to_players, size_delta, width_delta, rotation_delta, req.params.zoneId]
+      [label, color, x, y, size_delta, width_delta, rotation_delta, visible_to_players, req.params.zoneId]
     );
 
     const fullBoard = await getFullBoard(campaign_id);
