@@ -167,9 +167,20 @@ CREATE TABLE IF NOT EXISTS board_states (
     id SERIAL PRIMARY KEY,
     campaign_id INTEGER UNIQUE NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
     background_url TEXT,
+    background_type VARCHAR(10) NOT NULL DEFAULT 'image' CHECK (background_type IN ('image', 'video')),
     grid_visible BOOLEAN NOT NULL DEFAULT false,
     grid_size INTEGER NOT NULL DEFAULT 20, -- number of grid columns across the board width
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Reusable library of uploaded backgrounds (images and ambiance videos) a GM can pick from
+-- across campaigns/scenarios instead of re-uploading the same file every time.
+CREATE TABLE IF NOT EXISTS board_media (
+    id SERIAL PRIMARY KEY,
+    type VARCHAR(10) NOT NULL CHECK (type IN ('image', 'video')),
+    url TEXT NOT NULL,
+    label VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS board_tokens (

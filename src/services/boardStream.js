@@ -15,6 +15,10 @@ export function subscribe(campaignId, role, res) {
   return entry;
 }
 
+export function hasSubscribers(campaignId) {
+  return (subscribers.get(campaignId)?.size ?? 0) > 0;
+}
+
 function write(res, board) {
   res.write(`event: board\ndata: ${JSON.stringify(board)}\n\n`);
 }

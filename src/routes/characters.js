@@ -5,6 +5,8 @@ import {
   computeDerivedStats, computePvBodyGain, seedPvBodyTotal, NIVEAU_REQUIS_PAR_RANG,
 } from '../services/characterCalculations.js';
 import { logEvent } from '../services/eventLog.js';
+import { hasSubscribers, broadcastBoard } from '../services/boardStream.js';
+import { getFullBoard, buildBoardForRole } from './board.js';
 
 const router = Router();
 router.use(authenticateToken);
@@ -50,6 +52,16 @@ async function getCharacterWithVoies(characterId) {
   return { ...character, voies: voies.rows.map((v) => ({ ...v, capacites: capacitesByVoie[v.voie_id] || [] })) };
 }
 
+// Pushes the campaign's board over SSE whenever a character's live stats change, so the
+// board HUD (PV/PM/etc next to each token) stays in sync without a manual board refresh.
+// No-ops if nobody has the board open — cheap enough to call after every recompute.
+async function broadcastCharacterChange(campaignId) {
+  const key = String(campaignId);
+  if (!hasSubscribers(key)) return;
+  const board = await getFullBoard(campaignId);
+  broadcastBoard(key, board, buildBoardForRole);
+}
+
 /**
  * Recomputes pv_max/pm_max/points_chance/de_recuperation/defense/initiative/valeurs_attaque
  * for a character and persists them, carrying forward the *gain* into pv_current/pm_current
@@ -59,7 +71,13 @@ async function getCharacterWithVoies(characterId) {
 async function recomputeAndPersist(characterId) {
   const charResult = await pool.query('SELECT * FROM characters WHERE id = $1', [characterId]);
   const character = charResult.rows[0];
-  if (!character?.profil_id) return getCharacterWithVoies(characterId);
+  const finish = async () => {
+    const updated = await getCharacterWithVoies(characterId);
+    if (character?.campaign_id) await broadcastCharacterChange(character.campaign_id);
+    return updated;
+  };
+
+  if (!character?.profil_id) return finish();
 
   const profil = await pool.query(
     `SELECT p.*, f.pv_base, f.dr_die, f.dr_bonus, f.pc_bonus
@@ -67,7 +85,7 @@ async function recomputeAndPersist(characterId) {
      WHERE p.id = $1`,
     [character.profil_id]
   );
-  if (profil.rows.length === 0) return getCharacterWithVoies(characterId);
+  if (profil.rows.length === 0) return finish();
 
   const sortsCount = await pool.query(
     `SELECT count(*) FROM character_voies cv
@@ -95,7 +113,7 @@ async function recomputeAndPersist(characterId) {
     ]
   );
 
-  return getCharacterWithVoies(characterId);
+  return finish();
 }
 
 // Records which famille a just-purchased voie belongs to, for this level-up cycle's PV

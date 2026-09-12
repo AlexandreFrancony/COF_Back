@@ -41,21 +41,41 @@ async function getOrCreateBoard(campaignId) {
   return created.rows[0];
 }
 
-async function getFullBoard(campaignId) {
+export async function getFullBoard(campaignId) {
   const board = await getOrCreateBoard(campaignId);
   const [tokens, zones] = await Promise.all([
-    pool.query('SELECT * FROM board_tokens WHERE board_state_id = $1 ORDER BY id', [board.id]),
+    pool.query(
+      `SELECT bt.*, c.name AS character_name, c.is_npc,
+              c.pv_current, c.pv_max, c.pm_current, c.pm_max,
+              c.points_chance, c.defense, c.initiative
+       FROM board_tokens bt
+       LEFT JOIN characters c ON c.id = bt.character_id
+       WHERE bt.board_state_id = $1 ORDER BY bt.id`,
+      [board.id]
+    ),
     pool.query('SELECT * FROM board_zones WHERE board_state_id = $1 ORDER BY id', [board.id]),
   ]);
   return { ...board, tokens: tokens.rows, zones: zones.rows };
 }
 
-// GM sees every token/zone; players only see the ones the GM marked visible.
-function buildBoardForRole(board, role) {
+const STAT_FIELDS = ['pv_current', 'pv_max', 'pm_current', 'pm_max', 'points_chance', 'defense', 'initiative'];
+
+// A PNJ's live stats never reach a player, even when its pawn is shown on the map — only the
+// GM's own view (and the HUD it drives) gets to see enemy PV/PM/etc in real time.
+function stripEnemyStats(token) {
+  if (!token.is_npc) return token;
+  const stripped = { ...token };
+  for (const field of STAT_FIELDS) stripped[field] = null;
+  return stripped;
+}
+
+// GM sees every token/zone with full stats; players only see the ones the GM marked visible,
+// and never get a PNJ token's live stats (only its pawn, if the GM chose to show it at all).
+export function buildBoardForRole(board, role) {
   if (role === 'gm') return board;
   return {
     ...board,
-    tokens: board.tokens.filter((t) => t.visible_to_players),
+    tokens: board.tokens.filter((t) => t.visible_to_players).map(stripEnemyStats),
     zones: board.zones.filter((z) => z.visible_to_players),
   };
 }
@@ -130,7 +150,11 @@ router.get('/board-stream/:campaignId', async (req, res) => {
 });
 
 /**
- * PATCH /campaigns/:campaignId/board — GM only. Body: { background_url, grid_visible, grid_size }
+ * PATCH /campaigns/:campaignId/board — GM only.
+ * Body: { background_url, background_type, grid_visible, grid_size }
+ * background_type ('image' | 'video') tells the frontend how to render background_url —
+ * a video plays fullscreen/looped/muted behind the grid/zones/tokens instead of being used
+ * as a CSS background-image (p.ex. pour une ambiance sonore/visuelle hors combat).
  */
 router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
   try {
@@ -138,14 +162,15 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
     if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
 
     await getOrCreateBoard(req.params.campaignId);
-    const { background_url, grid_visible, grid_size } = req.body;
+    const { background_url, background_type, grid_visible, grid_size } = req.body;
     await pool.query(
       `UPDATE board_states SET
          background_url = COALESCE($1, background_url),
-         grid_visible = COALESCE($2, grid_visible),
-         grid_size = COALESCE($3, grid_size)
-       WHERE campaign_id = $4`,
-      [background_url, grid_visible, grid_size, req.params.campaignId]
+         background_type = COALESCE($2, background_type),
+         grid_visible = COALESCE($3, grid_visible),
+         grid_size = COALESCE($4, grid_size)
+       WHERE campaign_id = $5`,
+      [background_url, background_type, grid_visible, grid_size, req.params.campaignId]
     );
 
     const board = await getFullBoard(req.params.campaignId);
