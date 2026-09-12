@@ -43,17 +43,21 @@ async function getOrCreateBoard(campaignId) {
 
 async function getFullBoard(campaignId) {
   const board = await getOrCreateBoard(campaignId);
-  const tokens = await pool.query(
-    'SELECT * FROM board_tokens WHERE board_state_id = $1 ORDER BY id',
-    [board.id]
-  );
-  return { ...board, tokens: tokens.rows };
+  const [tokens, zones] = await Promise.all([
+    pool.query('SELECT * FROM board_tokens WHERE board_state_id = $1 ORDER BY id', [board.id]),
+    pool.query('SELECT * FROM board_zones WHERE board_state_id = $1 ORDER BY id', [board.id]),
+  ]);
+  return { ...board, tokens: tokens.rows, zones: zones.rows };
 }
 
-// GM sees every token; players only see the ones the GM marked visible.
+// GM sees every token/zone; players only see the ones the GM marked visible.
 function buildBoardForRole(board, role) {
   if (role === 'gm') return board;
-  return { ...board, tokens: board.tokens.filter((t) => t.visible_to_players) };
+  return {
+    ...board,
+    tokens: board.tokens.filter((t) => t.visible_to_players),
+    zones: board.zones.filter((z) => z.visible_to_players),
+  };
 }
 
 async function resolveRole(campaignId, user) {
@@ -232,6 +236,107 @@ router.patch('/board/tokens/:tokenId', requireGm, async (req, res) => {
     res.json(fullBoard);
   } catch (error) {
     console.error('Error PATCH board token:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * POST /campaigns/:campaignId/board/zones — GM only
+ * Body: { shape ('circle'|'rectangle'|'cone'), label, color, x, y, size, width, rotation, visible_to_players }
+ */
+router.post('/campaigns/:campaignId/board/zones', requireGm, async (req, res) => {
+  try {
+    const campaign = await findAccessibleCampaign(req.params.campaignId, req.user);
+    if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
+
+    const board = await getOrCreateBoard(req.params.campaignId);
+    const { shape, label, color, x, y, size, width, rotation, visible_to_players } = req.body;
+
+    if (!['circle', 'rectangle', 'cone'].includes(shape)) {
+      return res.status(400).json({ error: 'Forme de zone invalide' });
+    }
+
+    await pool.query(
+      `INSERT INTO board_zones (board_state_id, shape, label, color, x, y, size, width, rotation, visible_to_players)
+       VALUES ($1, $2, $3, COALESCE($4, '#c65d3b'), COALESCE($5, 50), COALESCE($6, 50),
+               COALESCE($7, 10), COALESCE($8, 10), COALESCE($9, 0), COALESCE($10, true))`,
+      [board.id, shape, label || null, color, x, y, size, width, rotation, visible_to_players]
+    );
+
+    const fullBoard = await getFullBoard(req.params.campaignId);
+    broadcastBoard(req.params.campaignId, fullBoard, buildBoardForRole);
+    res.status(201).json(fullBoard);
+  } catch (error) {
+    console.error('Error POST board zone:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * PATCH /board/zones/:zoneId — GM only
+ */
+router.patch('/board/zones/:zoneId', requireGm, async (req, res) => {
+  try {
+    const zoneRow = await pool.query(
+      `SELECT bz.*, bs.campaign_id FROM board_zones bz
+       JOIN board_states bs ON bs.id = bz.board_state_id
+       WHERE bz.id = $1`,
+      [req.params.zoneId]
+    );
+    if (zoneRow.rows.length === 0) return res.status(404).json({ error: 'Zone non trouvée' });
+
+    const { campaign_id } = zoneRow.rows[0];
+    const campaign = await findAccessibleCampaign(campaign_id, req.user);
+    if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
+
+    const { label, color, x, y, size, width, rotation, visible_to_players } = req.body;
+    await pool.query(
+      `UPDATE board_zones SET
+         label = COALESCE($1, label),
+         color = COALESCE($2, color),
+         x = COALESCE($3, x),
+         y = COALESCE($4, y),
+         size = COALESCE($5, size),
+         width = COALESCE($6, width),
+         rotation = COALESCE($7, rotation),
+         visible_to_players = COALESCE($8, visible_to_players)
+       WHERE id = $9`,
+      [label, color, x, y, size, width, rotation, visible_to_players, req.params.zoneId]
+    );
+
+    const fullBoard = await getFullBoard(campaign_id);
+    broadcastBoard(campaign_id, fullBoard, buildBoardForRole);
+    res.json(fullBoard);
+  } catch (error) {
+    console.error('Error PATCH board zone:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * DELETE /board/zones/:zoneId — GM only
+ */
+router.delete('/board/zones/:zoneId', requireGm, async (req, res) => {
+  try {
+    const zoneRow = await pool.query(
+      `SELECT bz.id, bs.campaign_id FROM board_zones bz
+       JOIN board_states bs ON bs.id = bz.board_state_id
+       WHERE bz.id = $1`,
+      [req.params.zoneId]
+    );
+    if (zoneRow.rows.length === 0) return res.status(404).json({ error: 'Zone non trouvée' });
+
+    const { campaign_id } = zoneRow.rows[0];
+    const campaign = await findAccessibleCampaign(campaign_id, req.user);
+    if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
+
+    await pool.query('DELETE FROM board_zones WHERE id = $1', [req.params.zoneId]);
+
+    const fullBoard = await getFullBoard(campaign_id);
+    broadcastBoard(campaign_id, fullBoard, buildBoardForRole);
+    res.json(fullBoard);
+  } catch (error) {
+    console.error('Error DELETE board zone:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

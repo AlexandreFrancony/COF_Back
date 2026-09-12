@@ -4,6 +4,7 @@ import { authenticateToken } from '../middleware/auth.js';
 import {
   computeDerivedStats, computePvBodyGain, seedPvBodyTotal, NIVEAU_REQUIS_PAR_RANG,
 } from '../services/characterCalculations.js';
+import { logEvent } from '../services/eventLog.js';
 
 const router = Router();
 router.use(authenticateToken);
@@ -252,6 +253,20 @@ router.patch('/characters/:id', async (req, res) => {
     }
 
     const updated = await recomputeAndPersist(req.params.id);
+
+    if (!isInitialCreation) {
+      if (pv_current !== undefined && pv_current !== character.pv_current) {
+        const delta = pv_current - character.pv_current;
+        await logEvent(character.campaign_id, character.id, 'pv_change',
+          `${character.name} : PV ${character.pv_current} → ${pv_current} (${delta > 0 ? '+' : ''}${delta})`);
+      }
+      if (pm_current !== undefined && pm_current !== character.pm_current) {
+        const delta = pm_current - character.pm_current;
+        await logEvent(character.campaign_id, character.id, 'pm_change',
+          `${character.name} : PM ${character.pm_current} → ${pm_current} (${delta > 0 ? '+' : ''}${delta})`);
+      }
+    }
+
     res.json(updated);
   } catch (error) {
     console.error('Error PATCH /characters/:id:', error.message);
@@ -294,8 +309,10 @@ router.post('/characters/:id/voies', async (req, res) => {
       return res.status(400).json({ error: 'Pas assez de points de capacité (1 requis)' });
     }
 
+    let voieName;
     if (spend_points) {
-      const voieRow = await pool.query('SELECT type, profil_id FROM rules_voies WHERE id = $1', [voie_id]);
+      const voieRow = await pool.query('SELECT name, type, profil_id FROM rules_voies WHERE id = $1', [voie_id]);
+      voieName = voieRow.rows[0]?.name;
       const isForeignProfilVoie = voieRow.rows[0]?.type === 'profil'
         && voieRow.rows[0].profil_id
         && voieRow.rows[0].profil_id !== character.profil_id;
@@ -331,6 +348,10 @@ router.post('/characters/:id/voies', async (req, res) => {
       );
       await recordVoieFamilyForLeveling(req.params.id, voie_id);
       await maybeFinalizeLevelPv(req.params.id);
+      if (result.rows.length > 0) {
+        await logEvent(character.campaign_id, character.id, 'voie_added',
+          `${character.name} acquiert ${voieName}`);
+      }
     }
 
     await recomputeAndPersist(req.params.id); // a spell-granting voie changes pm_max
@@ -396,6 +417,10 @@ router.patch('/characters/:id/voies/:voieId', async (req, res) => {
     await recordVoieFamilyForLeveling(req.params.id, req.params.voieId);
     await maybeFinalizeLevelPv(req.params.id);
 
+    const voieRow = await pool.query('SELECT name FROM rules_voies WHERE id = $1', [req.params.voieId]);
+    await logEvent(character.campaign_id, character.id, 'voie_rang_up',
+      `${character.name} : ${voieRow.rows[0]?.name} passe au rang ${newRang}`);
+
     const updated = await recomputeAndPersist(req.params.id); // a newly-unlocked sort changes pm_max
     res.json(updated);
   } catch (error) {
@@ -432,6 +457,8 @@ router.post('/characters/:id/level-up', async (req, res) => {
     );
 
     const updated = await recomputeAndPersist(req.params.id);
+    await logEvent(character.campaign_id, character.id, 'level_up',
+      `${character.name} passe au niveau ${character.level + 1}`);
     res.json(updated);
   } catch (error) {
     console.error('Error POST /characters/:id/level-up:', error.message);
@@ -463,6 +490,7 @@ router.post('/characters/:id/orphan-exchange', async (req, res) => {
     // than overriding pv_max/pm_max/etc. directly — a direct override gets silently clobbered
     // by the next recompute triggered by any other action (new voie, rang increase...).
     const updates = { capacity_points_available: character.capacity_points_available - 1 };
+    const choiceLabels = { pc: '+1 Chance', dr: '+1 Récupération', pv: '+2 PV', pm: '+2 PM' };
 
     if (choice === 'pc') {
       updates.pc_bonus_orphan = character.pc_bonus_orphan + 1;
@@ -484,6 +512,8 @@ router.post('/characters/:id/orphan-exchange', async (req, res) => {
     );
 
     const updated = await recomputeAndPersist(req.params.id); // carries the PV/PM gain into current, like a level-up
+    await logEvent(character.campaign_id, character.id, 'orphan_exchange',
+      `${character.name} échange un point orphelin contre ${choiceLabels[choice]}`);
     res.json(updated);
   } catch (error) {
     console.error('Error POST /characters/:id/orphan-exchange:', error.message);

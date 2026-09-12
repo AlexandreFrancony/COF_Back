@@ -181,6 +181,37 @@ CREATE TABLE IF NOT EXISTS board_tokens (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Area-of-effect markers (explosion, cone, line...) drawn over the board, same visibility
+-- model as tokens. x/y is the anchor point (center for circle, origin for rectangle/cone);
+-- size/width are percentages of the board width; rotation in degrees orients rectangle/cone.
+CREATE TABLE IF NOT EXISTS board_zones (
+    id SERIAL PRIMARY KEY,
+    board_state_id INTEGER NOT NULL REFERENCES board_states(id) ON DELETE CASCADE,
+    shape VARCHAR(20) NOT NULL CHECK (shape IN ('circle', 'rectangle', 'cone')),
+    label VARCHAR(100),
+    color VARCHAR(20) NOT NULL DEFAULT '#c65d3b',
+    x REAL NOT NULL DEFAULT 50,
+    y REAL NOT NULL DEFAULT 50,
+    size REAL NOT NULL DEFAULT 10,
+    width REAL NOT NULL DEFAULT 10,
+    rotation REAL NOT NULL DEFAULT 0,
+    visible_to_players BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================================================
+-- SESSION HISTORY (phase 3) — auto-logged character events + free-form GM notes
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS session_events (
+    id SERIAL PRIMARY KEY,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+    type VARCHAR(30) NOT NULL,
+    message TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN

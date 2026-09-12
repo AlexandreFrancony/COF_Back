@@ -15,6 +15,7 @@ import charactersRouter from './routes/characters.js';
 import rulesRouter from './routes/rules.js';
 import boardRouter from './routes/board.js';
 import scenariosRouter from './routes/scenarios.js';
+import eventsRouter from './routes/events.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -71,6 +72,7 @@ app.use('/', charactersRouter); // mounts /campaigns/:id/characters and /charact
 app.use('/rules', rulesRouter);
 app.use('/', boardRouter); // mounts /campaigns/:id/board and /board/tokens/:id
 app.use('/', scenariosRouter); // mounts /campaigns/:id/scenarios and /scenarios/:id
+app.use('/', eventsRouter); // mounts /campaigns/:id/events
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
