@@ -77,6 +77,38 @@ router.get('/campaigns/:campaignId/invites', authenticateToken, requireGm, async
 });
 
 /**
+ * DELETE /campaigns/:campaignId/invites/:inviteId
+ * GM only. Revokes a pending invite and removes its unclaimed character shell.
+ */
+router.delete('/campaigns/:campaignId/invites/:inviteId', authenticateToken, requireGm, async (req, res) => {
+  try {
+    const invite = await pool.query(
+      `SELECT ci.* FROM campaign_invites ci
+       JOIN campaigns c ON c.id = ci.campaign_id
+       WHERE ci.id = $1 AND ci.campaign_id = $2 AND c.gm_id = $3`,
+      [req.params.inviteId, req.params.campaignId, req.user.id]
+    );
+    if (invite.rows.length === 0) {
+      return res.status(404).json({ error: 'Invitation non trouvée' });
+    }
+    if (invite.rows[0].status !== 'pending') {
+      return res.status(400).json({ error: 'Seule une invitation en attente peut être révoquée' });
+    }
+
+    await pool.query('DELETE FROM campaign_invites WHERE id = $1', [req.params.inviteId]);
+    await pool.query(
+      'DELETE FROM characters WHERE id = $1 AND user_id IS NULL',
+      [invite.rows[0].character_id]
+    );
+
+    res.json({ message: 'Invitation révoquée' });
+  } catch (error) {
+    console.error('Error DELETE /campaigns/:campaignId/invites/:inviteId:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
  * GET /invites/:token
  * Public. Preview an invite before accepting it.
  */
