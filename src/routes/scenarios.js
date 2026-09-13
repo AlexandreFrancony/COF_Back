@@ -51,7 +51,9 @@ async function getScenarioRow(scenarioId) {
 async function attachTokens(scenarioRows) {
   if (scenarioRows.length === 0) return [];
   const tokens = await pool.query(
-    'SELECT * FROM scenario_tokens WHERE scenario_id = ANY($1) ORDER BY id',
+    `SELECT t.*, c.avatar_url AS character_avatar_url, c.avatar_emoji AS character_avatar_emoji
+     FROM scenario_tokens t LEFT JOIN characters c ON c.id = t.character_id
+     WHERE t.scenario_id = ANY($1) ORDER BY t.id`,
     [scenarioRows.map((s) => s.id)]
   );
   const byScenario = {};

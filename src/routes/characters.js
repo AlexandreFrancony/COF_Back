@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import path from 'path';
+import fs from 'fs';
+import multer from 'multer';
 import pool from '../db/pool.js';
 import { authenticateToken, requireGm } from '../middleware/auth.js';
 import {
@@ -11,12 +14,53 @@ import { getFullBoard, buildBoardForRole } from './board.js';
 const router = Router();
 router.use(authenticateToken);
 
+const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads');
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const avatarUpload = multer({
+  storage: multer.diskStorage({
+    destination: UPLOADS_DIR,
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+    },
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!/^image\/(png|jpe?g|webp|gif)$/.test(file.mimetype)) {
+      return cb(new Error("Format d'image non supporté"));
+    }
+    cb(null, true);
+  },
+});
+
 async function canAccessCharacter(character, user) {
   if (character.user_id === user.id) return true;
   if (user.role !== 'gm') return false;
   const campaign = await pool.query('SELECT gm_id FROM campaigns WHERE id = $1', [character.campaign_id]);
   return campaign.rows[0]?.gm_id === user.id;
 }
+
+/**
+ * POST /characters/:id/avatar — owner or GM, multipart field "image". Just uploads the file and
+ * hands back its URL; the caller still does PATCH /characters/:id with { avatar_url } (same
+ * two-step shape as the board's own image uploads) so avatar_emoji gets cleared consistently.
+ */
+router.post('/characters/:id/avatar', avatarUpload.single('image'), async (req, res) => {
+  try {
+    const existing = await pool.query('SELECT * FROM characters WHERE id = $1', [req.params.id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Personnage non trouvé' });
+    if (!(await canAccessCharacter(existing.rows[0], req.user))) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'Image requise' });
+
+    res.status(201).json({ url: `/uploads/${req.file.filename}` });
+  } catch (error) {
+    console.error('Error POST /characters/:id/avatar:', error.message);
+    res.status(500).json({ error: "Erreur lors de l'upload" });
+  }
+});
 
 // Shared shape for every route that returns a character: the raw row plus its voies, each
 // with the capacités owned up to their current rang. Used consistently everywhere (not just
@@ -336,11 +380,17 @@ router.patch('/characters/:id', async (req, res) => {
       equipement, notes, pv_current, pm_current, points_chance_current, dr_current,
       origine_humaine, armure_id, bouclier_id,
       arme_principale_id, arme_secondaire_id, custom_data,
+      avatar_url, avatar_emoji,
     } = req.body;
     const armureIdProvided = 'armure_id' in req.body;
     const bouclierIdProvided = 'bouclier_id' in req.body;
     const armePrincipaleIdProvided = 'arme_principale_id' in req.body;
     const armeSecondaireIdProvided = 'arme_secondaire_id' in req.body;
+    // A photo and an emoji are mutually exclusive avatars — setting one explicitly clears the
+    // other, so the rendering priority (photo, then emoji, cf. BoardCanvas) never gets stuck
+    // showing a stale emoji behind a since-removed photo or vice versa.
+    const avatarUrlProvided = 'avatar_url' in req.body;
+    const avatarEmojiProvided = 'avatar_emoji' in req.body;
     const {
       capacity_points_available, forgets_available, pv_body_total,
       pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan,
@@ -375,8 +425,10 @@ router.patch('/characters/:id', async (req, res) => {
          bouclier_id = CASE WHEN $21 THEN $22 ELSE bouclier_id END,
          arme_principale_id = CASE WHEN $23 THEN $24 ELSE arme_principale_id END,
          arme_secondaire_id = CASE WHEN $25 THEN $26 ELSE arme_secondaire_id END,
-         custom_data = custom_data || COALESCE($27::jsonb, '{}'::jsonb)
-       WHERE id = $28`,
+         custom_data = custom_data || COALESCE($27::jsonb, '{}'::jsonb),
+         avatar_url = CASE WHEN $28 THEN $29 WHEN $30 THEN NULL ELSE avatar_url END,
+         avatar_emoji = CASE WHEN $30 THEN $31 WHEN $28 THEN NULL ELSE avatar_emoji END
+       WHERE id = $32`,
       [
         name, profil_id, peuple_id, level,
         caracteristiques ? JSON.stringify(caracteristiques) : null,
@@ -389,6 +441,8 @@ router.patch('/characters/:id', async (req, res) => {
         armePrincipaleIdProvided, arme_principale_id ?? null,
         armeSecondaireIdProvided, arme_secondaire_id ?? null,
         custom_data ? JSON.stringify(custom_data) : null,
+        avatarUrlProvided, avatar_url ?? null,
+        avatarEmojiProvided, avatar_emoji ?? null,
         req.params.id,
       ]
     );

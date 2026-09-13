@@ -146,6 +146,11 @@ CREATE TABLE IF NOT EXISTS characters (
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     name VARCHAR(100) NOT NULL,
     is_npc BOOLEAN NOT NULL DEFAULT false, -- GM-controlled, never claimed via an invite
+    -- Avatar shown wherever the character appears as a pawn (board token, HUD card): a real
+    -- photo takes priority when set, an emoji is the lightweight fallback, plain color/initial
+    -- if neither is set. Editable by the owning player or the GM, same as equipement/notes.
+    avatar_url TEXT,
+    avatar_emoji VARCHAR(8),
     profil_id INTEGER REFERENCES rules_profils(id),
     peuple_id INTEGER REFERENCES rules_peuples(id),
     level INTEGER NOT NULL DEFAULT 1,
@@ -244,6 +249,7 @@ CREATE TABLE IF NOT EXISTS board_states (
     camera_x REAL NOT NULL DEFAULT 50,
     camera_y REAL NOT NULL DEFAULT 50,
     camera_width REAL NOT NULL DEFAULT 100,
+    token_size INTEGER NOT NULL DEFAULT 40, -- token/pawn circle diameter in px, GM-adjustable
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

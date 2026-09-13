@@ -47,7 +47,8 @@ export async function getFullBoard(campaignId) {
     pool.query(
       `SELECT bt.*, c.name AS character_name, c.is_npc,
               c.pv_current, c.pv_max, c.pm_current, c.pm_max,
-              c.points_chance, c.defense, c.initiative
+              c.points_chance, c.defense, c.initiative,
+              c.avatar_url AS character_avatar_url, c.avatar_emoji AS character_avatar_emoji
        FROM board_tokens bt
        LEFT JOIN characters c ON c.id = bt.character_id
        WHERE bt.board_state_id = $1 ORDER BY bt.id`,
@@ -172,6 +173,7 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
     const {
       background_url, background_type, grid_visible, grid_size,
       camera_x, camera_y, camera_width, camera_width_delta,
+      token_size_delta,
     } = req.body;
     await pool.query(
       `UPDATE board_states SET
@@ -185,11 +187,16 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
            WHEN $7::real IS NOT NULL THEN LEAST(100, GREATEST(10, $7))
            WHEN $8::real IS NOT NULL THEN LEAST(100, GREATEST(10, camera_width + $8))
            ELSE camera_width
+         END,
+         token_size = CASE
+           WHEN $9::int IS NOT NULL THEN LEAST(80, GREATEST(20, token_size + $9))
+           ELSE token_size
          END
-       WHERE campaign_id = $9`,
+       WHERE campaign_id = $10`,
       [
         background_url, background_type, grid_visible, grid_size,
         camera_x, camera_y, camera_width, camera_width_delta,
+        token_size_delta,
         req.params.campaignId,
       ]
     );
