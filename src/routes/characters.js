@@ -303,7 +303,7 @@ router.patch('/characters/:id', async (req, res) => {
       name, profil_id, peuple_id, level, caracteristiques,
       equipement, notes, pv_current, pm_current, points_chance_current, dr_current,
       origine_humaine, armure_id, bouclier_id,
-      arme_principale_id, arme_secondaire_id,
+      arme_principale_id, arme_secondaire_id, custom_data,
     } = req.body;
     const armureIdProvided = 'armure_id' in req.body;
     const bouclierIdProvided = 'bouclier_id' in req.body;
@@ -342,8 +342,9 @@ router.patch('/characters/:id', async (req, res) => {
          armure_id = CASE WHEN $19 THEN $20 ELSE armure_id END,
          bouclier_id = CASE WHEN $21 THEN $22 ELSE bouclier_id END,
          arme_principale_id = CASE WHEN $23 THEN $24 ELSE arme_principale_id END,
-         arme_secondaire_id = CASE WHEN $25 THEN $26 ELSE arme_secondaire_id END
-       WHERE id = $27`,
+         arme_secondaire_id = CASE WHEN $25 THEN $26 ELSE arme_secondaire_id END,
+         custom_data = custom_data || COALESCE($27::jsonb, '{}'::jsonb)
+       WHERE id = $28`,
       [
         name, profil_id, peuple_id, level,
         caracteristiques ? JSON.stringify(caracteristiques) : null,
@@ -355,6 +356,7 @@ router.patch('/characters/:id', async (req, res) => {
         bouclierIdProvided, bouclier_id ?? null,
         armePrincipaleIdProvided, arme_principale_id ?? null,
         armeSecondaireIdProvided, arme_secondaire_id ?? null,
+        custom_data ? JSON.stringify(custom_data) : null,
         req.params.id,
       ]
     );

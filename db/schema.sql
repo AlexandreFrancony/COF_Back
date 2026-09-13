@@ -187,6 +187,11 @@ CREATE TABLE IF NOT EXISTS characters (
     -- Changement d'orientation (p.42-43): +1 per level-up (+2 if INT>=+2), consumed by
     -- forgetting a capacité to refund its point cost and spend it elsewhere.
     forgets_available INTEGER NOT NULL DEFAULT 0,
+    -- Escape hatch for one-off homebrew mechanics too narrow to deserve their own columns
+    -- (e.g. Augustin Moëdec's dual-facette schizophrenia — see CharacterSheet.jsx's
+    -- FACETTE_VOIE_GROUPS/threshold_percent handling, hardcoded to this one character's voies,
+    -- not a general system). Empty object for every other character.
+    custom_data JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
