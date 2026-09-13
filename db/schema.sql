@@ -111,6 +111,26 @@ CREATE TABLE IF NOT EXISTS rules_armures (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Armes de contact et à distance (p.182-184). Unlike armor, nothing here feeds a stored/
+-- computed stat — damage is rolled live at the table, not persisted — so every column is
+-- reference info surfaced on the sheet (dice, DM type, portée, price, notes like "arme à deux
+-- mains" or "critique sur 19-20"); for_applies is the one bit actually used by the frontend
+-- display (it adds FOR to the shown damage for a contact weapon, per p.183 — false for the
+-- rare book exception, e.g. Stylet). Two-handed restrictions, encumbrance etc. stay
+-- unenforced, same deliberate scope cut as rules_armures.
+CREATE TABLE IF NOT EXISTS rules_armes (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    category VARCHAR(10) NOT NULL DEFAULT 'contact' CHECK (category IN ('contact', 'distance')),
+    damage_dice VARCHAR(20) NOT NULL,
+    type_degats VARCHAR(20), -- Contondants / Perforants / Tranchants, informational
+    portee INTEGER, -- meters, informational, distance weapons only
+    prix VARCHAR(20),
+    for_applies BOOLEAN NOT NULL DEFAULT true,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ============================================================================
 -- CHARACTERS
 -- ============================================================================
@@ -138,6 +158,8 @@ CREATE TABLE IF NOT EXISTS characters (
     equipement JSONB NOT NULL DEFAULT '[]',
     armure_id INTEGER REFERENCES rules_armures(id) ON DELETE SET NULL, -- flat DEF bonus, see rules_armures
     bouclier_id INTEGER REFERENCES rules_armures(id) ON DELETE SET NULL, -- stacks with armure_id (p.188)
+    arme_principale_id INTEGER REFERENCES rules_armes(id) ON DELETE SET NULL,
+    arme_secondaire_id INTEGER REFERENCES rules_armes(id) ON DELETE SET NULL, -- e.g. dual-wielding
     notes TEXT,
     -- The human peuple's rang-1 "Diversité" capacité (p.46) requires picking a geographic/social
     -- origin (or a custom gagne-pain) — free text since the +3 bonus it grants is to narrative

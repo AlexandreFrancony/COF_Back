@@ -16,6 +16,7 @@ import rulesRouter from './routes/rules.js';
 import boardRouter from './routes/board.js';
 import boardMediaRouter from './routes/boardMedia.js';
 import armuresRouter from './routes/armures.js';
+import armesRouter from './routes/armes.js';
 import scenariosRouter from './routes/scenarios.js';
 import eventsRouter from './routes/events.js';
 
@@ -75,6 +76,7 @@ app.use('/rules', rulesRouter);
 app.use('/', boardRouter); // mounts /campaigns/:id/board and /board/tokens/:id
 app.use('/', boardMediaRouter); // mounts /board-media
 app.use('/', armuresRouter); // mounts /rules/armures
+app.use('/', armesRouter); // mounts /rules/armes
 app.use('/', scenariosRouter); // mounts /campaigns/:id/scenarios and /scenarios/:id
 app.use('/', eventsRouter); // mounts /campaigns/:id/events
 
