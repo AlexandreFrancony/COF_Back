@@ -80,7 +80,7 @@ router.delete('/board-media/:id', requireGm, async (req, res) => {
 
     const filePath = path.join(UPLOADS_DIR, path.basename(existing.rows[0].url));
     fs.unlink(filePath, () => {});
-    res.status(204).end();
+    res.json({ message: 'Média supprimé' });
   } catch (error) {
     console.error('Error DELETE board-media:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });

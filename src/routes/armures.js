@@ -46,7 +46,7 @@ router.post('/rules/armures', requireGm, async (req, res) => {
 router.delete('/rules/armures/:id', requireGm, async (req, res) => {
   try {
     await pool.query('DELETE FROM rules_armures WHERE id = $1', [req.params.id]);
-    res.status(204).end();
+    res.json({ message: 'Armure supprimée' });
   } catch (error) {
     console.error('Error DELETE rules/armures:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
