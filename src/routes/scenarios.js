@@ -61,6 +61,23 @@ async function attachTokens(scenarioRows) {
   return scenarioRows.map((s) => ({ ...s, tokens: byScenario[s.id] || [] }));
 }
 
+async function attachZones(scenarioRows) {
+  if (scenarioRows.length === 0) return [];
+  const zones = await pool.query(
+    'SELECT * FROM scenario_zones WHERE scenario_id = ANY($1) ORDER BY id',
+    [scenarioRows.map((s) => s.id)]
+  );
+  const byScenario = {};
+  for (const z of zones.rows) (byScenario[z.scenario_id] ??= []).push(z);
+  return scenarioRows.map((s) => ({ ...s, zones: byScenario[s.id] || [] }));
+}
+
+// A scenario is enriched the same way a live board is (getFullBoard): its background (joined),
+// tokens and zones, so the shared BoardEditor component can render either one interchangeably.
+async function enrichScenarios(scenarioRows) {
+  return attachZones(await attachTokens(scenarioRows));
+}
+
 /**
  * GET /campaigns/:campaignId/scenarios
  */
@@ -77,7 +94,7 @@ router.get('/campaigns/:campaignId/scenarios', requireGm, async (req, res) => {
        WHERE s.campaign_id = $1 ORDER BY s.created_at`,
       [req.params.campaignId]
     );
-    res.json(await attachTokens(result.rows));
+    res.json(await enrichScenarios(result.rows));
   } catch (error) {
     console.error('Error GET /campaigns/:campaignId/scenarios:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -102,7 +119,7 @@ router.post('/campaigns/:campaignId/scenarios', requireGm, async (req, res) => {
        VALUES ($1, $2, $3, $4) RETURNING *`,
       [req.params.campaignId, name, notes || null, background_media_id || null]
     );
-    res.status(201).json({ ...result.rows[0], background_url: null, background_type: null, tokens: [] });
+    res.status(201).json({ ...result.rows[0], background_url: null, background_type: null, tokens: [], zones: [] });
   } catch (error) {
     console.error('Error POST /campaigns/:campaignId/scenarios:', error.message);
     res.status(500).json({ error: 'Erreur lors de la création du scénario' });
@@ -111,23 +128,34 @@ router.post('/campaigns/:campaignId/scenarios', requireGm, async (req, res) => {
 
 /**
  * PATCH /scenarios/:id
- * Body: { name, notes, background_media_id }
+ * Body: { name, notes, background_media_id, grid_visible, grid_size, token_size_delta }
+ * grid_visible/grid_size are absolute (a checkbox and a direct value have no race to guard
+ * against); token_size_delta is an atomic server-side delta, same reasoning as board_states'
+ * own token_size_delta (see PATCH /campaigns/:campaignId/board) — and the first +/- click ever
+ * made on a scenario's token size seeds it off the same 40px default the live board starts at,
+ * via COALESCE(token_size, 40), rather than off NULL.
  */
 router.patch('/scenarios/:id', requireGm, async (req, res) => {
   try {
-    const { name, notes, background_media_id } = req.body;
+    const { name, notes, background_media_id, grid_visible, grid_size, token_size_delta } = req.body;
     const result = await pool.query(
       `UPDATE campaign_scenarios s SET
          name = COALESCE($1, s.name),
          notes = COALESCE($2, s.notes),
-         background_media_id = COALESCE($3, s.background_media_id)
+         background_media_id = COALESCE($3, s.background_media_id),
+         grid_visible = COALESCE($4, s.grid_visible),
+         grid_size = COALESCE($5, s.grid_size),
+         token_size = CASE
+           WHEN $6::int IS NOT NULL THEN LEAST(80, GREATEST(20, COALESCE(s.token_size, 40) + $6))
+           ELSE s.token_size
+         END
        FROM campaigns c
-       WHERE s.id = $4 AND s.campaign_id = c.id AND c.gm_id = $5
+       WHERE s.id = $7 AND s.campaign_id = c.id AND c.gm_id = $8
        RETURNING s.id`,
-      [name, notes, background_media_id, req.params.id, req.user.id]
+      [name, notes, background_media_id, grid_visible, grid_size, token_size_delta, req.params.id, req.user.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Scénario non trouvé' });
-    res.json((await attachTokens([await getScenarioRow(result.rows[0].id)]))[0]);
+    res.json((await enrichScenarios([await getScenarioRow(result.rows[0].id)]))[0]);
   } catch (error) {
     console.error('Error PATCH /scenarios/:id:', error.message);
     res.status(500).json({ error: 'Erreur lors de la mise à jour' });
@@ -173,7 +201,7 @@ router.post('/scenarios/:id/tokens', requireGm, async (req, res) => {
       [req.params.id, character_id || null, label, image_url || null, color, x, y, visible_to_players]
     );
 
-    res.status(201).json((await attachTokens([await getScenarioRow(req.params.id)]))[0]);
+    res.status(201).json((await enrichScenarios([await getScenarioRow(req.params.id)]))[0]);
   } catch (error) {
     console.error('Error POST /scenarios/:id/tokens:', error.message);
     res.status(500).json({ error: "Erreur lors de l'ajout du pion" });
@@ -181,7 +209,10 @@ router.post('/scenarios/:id/tokens', requireGm, async (req, res) => {
 });
 
 /**
- * PATCH /scenario-tokens/:id — move or edit a prepared token (drag-end sends x/y).
+ * PATCH /scenario-tokens/:id — move or edit a prepared token (drag-end sends x/y). Returns the
+ * full enriched scenario (not just the token row) — same contract as board.js's own token/zone
+ * routes returning the full board — so the shared BoardEditor's "apply the response" handler
+ * works identically whether it's talking to a live board or a scenario.
  */
 router.patch('/scenario-tokens/:id', requireGm, async (req, res) => {
   try {
@@ -196,11 +227,11 @@ router.patch('/scenario-tokens/:id', requireGm, async (req, res) => {
          visible_to_players = COALESCE($6, t.visible_to_players)
        FROM campaign_scenarios s JOIN campaigns c ON c.id = s.campaign_id
        WHERE t.id = $7 AND t.scenario_id = s.id AND c.gm_id = $8
-       RETURNING t.*`,
+       RETURNING t.scenario_id`,
       [label, image_url, color, x, y, visible_to_players, req.params.id, req.user.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Pion non trouvé' });
-    res.json(result.rows[0]);
+    res.json((await enrichScenarios([await getScenarioRow(result.rows[0].scenario_id)]))[0]);
   } catch (error) {
     console.error('Error PATCH /scenario-tokens/:id:', error.message);
     res.status(500).json({ error: 'Erreur lors de la mise à jour du pion' });
@@ -208,7 +239,7 @@ router.patch('/scenario-tokens/:id', requireGm, async (req, res) => {
 });
 
 /**
- * DELETE /scenario-tokens/:id
+ * DELETE /scenario-tokens/:id — returns the full enriched scenario, see PATCH above.
  */
 router.delete('/scenario-tokens/:id', requireGm, async (req, res) => {
   try {
@@ -216,11 +247,11 @@ router.delete('/scenario-tokens/:id', requireGm, async (req, res) => {
       `DELETE FROM scenario_tokens t
        USING campaign_scenarios s, campaigns c
        WHERE t.id = $1 AND t.scenario_id = s.id AND s.campaign_id = c.id AND c.gm_id = $2
-       RETURNING t.id`,
+       RETURNING t.scenario_id`,
       [req.params.id, req.user.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Pion non trouvé' });
-    res.json({ message: 'Pion supprimé' });
+    res.json((await enrichScenarios([await getScenarioRow(result.rows[0].scenario_id)]))[0]);
   } catch (error) {
     console.error('Error DELETE /scenario-tokens/:id:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -228,25 +259,119 @@ router.delete('/scenario-tokens/:id', requireGm, async (req, res) => {
 });
 
 /**
- * POST /scenarios/:id/launch — applies the scenario's prepared background (if any) and adds
- * its prepared tokens to the campaign's live board. Additive only: never clears or replaces
- * whatever tokens/background the board already has.
+ * POST /scenarios/:id/zones — add a prepared zone. Body mirrors POST board/zones exactly:
+ * { shape ('circle'|'rectangle'|'cone'), label, color, x, y, size, width, rotation, visible_to_players }
+ */
+router.post('/scenarios/:id/zones', requireGm, async (req, res) => {
+  try {
+    if (!(await ownedScenario(req.params.id, req.user.id))) {
+      return res.status(404).json({ error: 'Scénario non trouvé' });
+    }
+
+    const { shape, label, color, x, y, size, width, rotation, visible_to_players } = req.body;
+    if (!['circle', 'rectangle', 'cone'].includes(shape)) {
+      return res.status(400).json({ error: 'Forme de zone invalide' });
+    }
+
+    await pool.query(
+      `INSERT INTO scenario_zones (scenario_id, shape, label, color, x, y, size, width, rotation, visible_to_players)
+       VALUES ($1, $2, $3, COALESCE($4, '#c65d3b'), COALESCE($5, 50), COALESCE($6, 50),
+               COALESCE($7, 10), COALESCE($8, 10), COALESCE($9, 0), COALESCE($10, true))`,
+      [req.params.id, shape, label || null, color, x, y, size, width, rotation, visible_to_players]
+    );
+
+    res.status(201).json((await enrichScenarios([await getScenarioRow(req.params.id)]))[0]);
+  } catch (error) {
+    console.error('Error POST /scenarios/:id/zones:', error.message);
+    res.status(500).json({ error: "Erreur lors de l'ajout de la zone" });
+  }
+});
+
+/**
+ * PATCH /scenario-zones/:id — mirrors PATCH board/zones/:zoneId (same delta-based size/width/
+ * rotation reasoning), returns the full enriched scenario.
+ */
+router.patch('/scenario-zones/:id', requireGm, async (req, res) => {
+  try {
+    const {
+      label, color, x, y, visible_to_players,
+      size_delta, width_delta, rotation_delta,
+    } = req.body;
+    const result = await pool.query(
+      `UPDATE scenario_zones z SET
+         label = COALESCE($1, z.label),
+         color = COALESCE($2, z.color),
+         x = COALESCE($3, z.x),
+         y = COALESCE($4, z.y),
+         size = GREATEST(1, z.size + COALESCE($5, 0)),
+         width = GREATEST(1, z.width + COALESCE($6, 0)),
+         rotation = MOD((z.rotation + COALESCE($7, 0) + 360)::numeric, 360),
+         visible_to_players = COALESCE($8, z.visible_to_players)
+       FROM campaign_scenarios s JOIN campaigns c ON c.id = s.campaign_id
+       WHERE z.id = $9 AND z.scenario_id = s.id AND c.gm_id = $10
+       RETURNING z.scenario_id`,
+      [label, color, x, y, size_delta, width_delta, rotation_delta, visible_to_players, req.params.id, req.user.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Zone non trouvée' });
+    res.json((await enrichScenarios([await getScenarioRow(result.rows[0].scenario_id)]))[0]);
+  } catch (error) {
+    console.error('Error PATCH /scenario-zones/:id:', error.message);
+    res.status(500).json({ error: 'Erreur lors de la mise à jour de la zone' });
+  }
+});
+
+/**
+ * DELETE /scenario-zones/:id
+ */
+router.delete('/scenario-zones/:id', requireGm, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `DELETE FROM scenario_zones z
+       USING campaign_scenarios s, campaigns c
+       WHERE z.id = $1 AND z.scenario_id = s.id AND s.campaign_id = c.id AND c.gm_id = $2
+       RETURNING z.scenario_id`,
+      [req.params.id, req.user.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Zone non trouvée' });
+    res.json((await enrichScenarios([await getScenarioRow(result.rows[0].scenario_id)]))[0]);
+  } catch (error) {
+    console.error('Error DELETE /scenario-zones/:id:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * POST /scenarios/:id/launch — applies whatever the scenario actually customized (background,
+ * grid, token size) and adds its prepared tokens/zones to the campaign's live board. Additive
+ * only for tokens/zones: nothing already on the board is ever cleared or replaced. Background/
+ * grid/token size are the scenario's own settings, but each only overrides the live board when
+ * it was actually set here — grid_visible/grid_size/token_size are NULL until the GM touches
+ * those controls for this scenario, specifically so launching an otherwise-untouched scenario
+ * can't silently reset the live board's grid to hidden or its token size back to 40.
  */
 router.post('/scenarios/:id/launch', requireGm, async (req, res) => {
   try {
     const scenario = await ownedScenario(req.params.id, req.user.id);
     if (!scenario) return res.status(404).json({ error: 'Scénario non trouvé' });
 
-    const [full] = await attachTokens([await getScenarioRow(req.params.id)]);
+    const [full] = await enrichScenarios([await getScenarioRow(req.params.id)]);
 
     const board = await getOrCreateBoard(scenario.campaign_id);
 
-    if (full.background_media_id) {
-      await pool.query(
-        'UPDATE board_states SET background_url = $1, background_type = $2 WHERE id = $3',
-        [full.background_url, full.background_type, board.id]
-      );
-    }
+    await pool.query(
+      `UPDATE board_states SET
+         background_url = CASE WHEN $1::int IS NOT NULL THEN $2 ELSE background_url END,
+         background_type = CASE WHEN $1::int IS NOT NULL THEN $3 ELSE background_type END,
+         grid_visible = COALESCE($4, grid_visible),
+         grid_size = COALESCE($5, grid_size),
+         token_size = COALESCE($6, token_size)
+       WHERE id = $7`,
+      [
+        full.background_media_id, full.background_url, full.background_type,
+        full.grid_visible, full.grid_size, full.token_size,
+        board.id,
+      ]
+    );
 
     for (const t of full.tokens) {
       await pool.query(
@@ -256,9 +381,17 @@ router.post('/scenarios/:id/launch', requireGm, async (req, res) => {
       );
     }
 
+    for (const z of full.zones) {
+      await pool.query(
+        `INSERT INTO board_zones (board_state_id, shape, label, color, x, y, size, width, rotation, visible_to_players)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [board.id, z.shape, z.label, z.color, z.x, z.y, z.size, z.width, z.rotation, z.visible_to_players]
+      );
+    }
+
     const fullBoard = await getFullBoard(scenario.campaign_id);
     broadcastBoard(scenario.campaign_id, fullBoard, buildBoardForRole);
-    res.json({ message: 'Scénario lancé', tokens_added: full.tokens.length });
+    res.json({ message: 'Scénario lancé', tokens_added: full.tokens.length, zones_added: full.zones.length });
   } catch (error) {
     console.error('Error POST /scenarios/:id/launch:', error.message);
     res.status(500).json({ error: 'Erreur lors du lancement du scénario' });

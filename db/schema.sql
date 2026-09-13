@@ -279,6 +279,15 @@ CREATE TABLE IF NOT EXISTS board_tokens (
 -- A scenario can prepare a background ahead of time (picked from the shared board_media
 -- library) — "launching" the scenario later copies it onto the campaign's live board_states.
 ALTER TABLE campaign_scenarios ADD COLUMN IF NOT EXISTS background_media_id INTEGER REFERENCES board_media(id) ON DELETE SET NULL;
+-- Same prep-ahead-of-time reasoning extended to grid/token size: a scenario is a full mini
+-- board_states, not just a background — "launching" copies these onto the live board too.
+-- Deliberately nullable with NO default (unlike board_states' own NOT NULL DEFAULT columns):
+-- NULL means "never customized for this scenario", so launching an otherwise-untouched scenario
+-- doesn't silently reset the live board's grid to hidden / token size to 40. Only a value the
+-- GM actually set here (grid toggled, or the token-size +/- touched at least once) travels.
+ALTER TABLE campaign_scenarios ADD COLUMN IF NOT EXISTS grid_visible BOOLEAN;
+ALTER TABLE campaign_scenarios ADD COLUMN IF NOT EXISTS grid_size INTEGER;
+ALTER TABLE campaign_scenarios ADD COLUMN IF NOT EXISTS token_size INTEGER;
 
 -- Prepared tokens for a scenario — same shape as board_tokens, but scoped to a scenario
 -- instead of a live board_state, so the GM can lay out an encounter ahead of time without
@@ -302,6 +311,24 @@ CREATE TABLE IF NOT EXISTS scenario_tokens (
 CREATE TABLE IF NOT EXISTS board_zones (
     id SERIAL PRIMARY KEY,
     board_state_id INTEGER NOT NULL REFERENCES board_states(id) ON DELETE CASCADE,
+    shape VARCHAR(20) NOT NULL CHECK (shape IN ('circle', 'rectangle', 'cone')),
+    label VARCHAR(100),
+    color VARCHAR(20) NOT NULL DEFAULT '#c65d3b',
+    x REAL NOT NULL DEFAULT 50,
+    y REAL NOT NULL DEFAULT 50,
+    size REAL NOT NULL DEFAULT 10,
+    width REAL NOT NULL DEFAULT 10,
+    rotation REAL NOT NULL DEFAULT 0,
+    visible_to_players BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Same shape as board_zones, scoped to a scenario instead of a live board_state — see
+-- scenario_tokens above for the same prep-ahead-of-time reasoning. Launching copies these onto
+-- board_zones.
+CREATE TABLE IF NOT EXISTS scenario_zones (
+    id SERIAL PRIMARY KEY,
+    scenario_id INTEGER NOT NULL REFERENCES campaign_scenarios(id) ON DELETE CASCADE,
     shape VARCHAR(20) NOT NULL CHECK (shape IN ('circle', 'rectangle', 'cone')),
     label VARCHAR(100),
     color VARCHAR(20) NOT NULL DEFAULT '#c65d3b',
