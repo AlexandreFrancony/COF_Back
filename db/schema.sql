@@ -270,6 +270,26 @@ CREATE TABLE IF NOT EXISTS board_tokens (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- A scenario can prepare a background ahead of time (picked from the shared board_media
+-- library) — "launching" the scenario later copies it onto the campaign's live board_states.
+ALTER TABLE campaign_scenarios ADD COLUMN IF NOT EXISTS background_media_id INTEGER REFERENCES board_media(id) ON DELETE SET NULL;
+
+-- Prepared tokens for a scenario — same shape as board_tokens, but scoped to a scenario
+-- instead of a live board_state, so the GM can lay out an encounter ahead of time without
+-- touching the current game. "Launching" the scenario copies these onto board_tokens.
+CREATE TABLE IF NOT EXISTS scenario_tokens (
+    id SERIAL PRIMARY KEY,
+    scenario_id INTEGER NOT NULL REFERENCES campaign_scenarios(id) ON DELETE CASCADE,
+    character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+    label VARCHAR(100) NOT NULL,
+    image_url TEXT,
+    color VARCHAR(20) NOT NULL DEFAULT '#c65d3b',
+    x REAL NOT NULL DEFAULT 50,
+    y REAL NOT NULL DEFAULT 50,
+    visible_to_players BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Area-of-effect markers (explosion, cone, line...) drawn over the board, same visibility
 -- model as tokens. x/y is the anchor point (center for circle, origin for rectangle/cone);
 -- size/width are percentages of the board width; rotation in degrees orients rectangle/cone.

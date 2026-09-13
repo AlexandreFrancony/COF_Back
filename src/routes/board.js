@@ -30,7 +30,7 @@ const upload = multer({
   },
 });
 
-async function getOrCreateBoard(campaignId) {
+export async function getOrCreateBoard(campaignId) {
   const existing = await pool.query('SELECT * FROM board_states WHERE campaign_id = $1', [campaignId]);
   if (existing.rows.length > 0) return existing.rows[0];
 
