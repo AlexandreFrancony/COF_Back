@@ -28,7 +28,8 @@ async function getCharacterWithVoies(characterId) {
   if (!character) return null;
 
   const voies = await pool.query(
-    `SELECT cv.rang, cv.rang_cap, cv.obtained_at_level, v.id AS voie_id, v.code, v.name, v.type
+    `SELECT cv.rang, cv.rang_cap, cv.obtained_at_level, cv.only_capacite_id, cv.nested_under_capacite_id,
+            v.id AS voie_id, v.code, v.name, v.type
      FROM character_voies cv JOIN rules_voies v ON v.id = cv.voie_id
      WHERE cv.character_id = $1`,
     [characterId]
@@ -36,7 +37,7 @@ async function getCharacterWithVoies(characterId) {
 
   const capacites = voies.rows.length > 0
     ? await pool.query(
-        `SELECT c.* FROM rules_capacites c
+        `SELECT c.*, cv.only_capacite_id FROM rules_capacites c
          JOIN character_voies cv ON cv.voie_id = c.voie_id AND c.rang <= cv.rang
          WHERE cv.character_id = $1
          ORDER BY c.voie_id, c.rang`,
@@ -45,7 +46,10 @@ async function getCharacterWithVoies(characterId) {
     : { rows: [] };
 
   const capacitesByVoie = {};
-  for (const cap of capacites.rows) {
+  for (const { only_capacite_id, ...cap } of capacites.rows) {
+    // only_capacite_id restricts this voie's display to that one borrowed capacité — every
+    // other rang<=rang capacité the raw join would otherwise include is dropped.
+    if (only_capacite_id && only_capacite_id !== cap.id) continue;
     (capacitesByVoie[cap.voie_id] ??= []).push(cap);
   }
 
@@ -88,12 +92,40 @@ async function recomputeAndPersist(characterId) {
   );
   if (profil.rows.length === 0) return finish();
 
-  const sortsCount = await pool.query(
-    `SELECT count(*) FROM character_voies cv
-     JOIN rules_capacites c ON c.voie_id = cv.voie_id AND c.rang <= cv.rang
-     WHERE cv.character_id = $1 AND c.est_sort = true`,
-    [characterId]
-  );
+  // Augustin Moëdec's dual-facette schizophrenia (hardcoded to these exact voie_ids, not a
+  // general system — see CharacterSheet.jsx's FACETTE_VOIE_GROUPS): he only ever has access to
+  // ONE facette's voies at a time, so counting every known sort across both facettes would
+  // overstate his real PM max. Compute it once per facette (shared voies + that facette's own)
+  // and keep the higher result, gated on custom_data.threshold_percent being set (a no-op query
+  // shape change for every other character, who has nothing in either group).
+  const FACETTE_CALME_VOIE_IDS = [76, 78];
+  const FACETTE_MAGE_VOIE_IDS = [82, 83];
+  let sortsCountValue;
+  if (character.custom_data?.threshold_percent != null) {
+    const perFacette = await pool.query(
+      `SELECT
+         count(*) FILTER (WHERE cv.voie_id != ALL($2) AND cv.voie_id != ALL($3)) AS shared,
+         count(*) FILTER (WHERE cv.voie_id = ANY($2)) AS calme,
+         count(*) FILTER (WHERE cv.voie_id = ANY($3)) AS mage
+       FROM character_voies cv
+       JOIN rules_capacites c ON c.voie_id = cv.voie_id AND c.rang <= cv.rang
+       WHERE cv.character_id = $1 AND c.est_sort = true`,
+      [characterId, FACETTE_CALME_VOIE_IDS, FACETTE_MAGE_VOIE_IDS]
+    );
+    const { shared, calme, mage } = perFacette.rows[0];
+    sortsCountValue = Math.max(
+      parseInt(shared, 10) + parseInt(calme, 10),
+      parseInt(shared, 10) + parseInt(mage, 10)
+    );
+  } else {
+    const sortsCount = await pool.query(
+      `SELECT count(*) FROM character_voies cv
+       JOIN rules_capacites c ON c.voie_id = cv.voie_id AND c.rang <= cv.rang
+       WHERE cv.character_id = $1 AND c.est_sort = true`,
+      [characterId]
+    );
+    sortsCountValue = parseInt(sortsCount.rows[0].count, 10);
+  }
 
   // The +1 PC from the Voie de l'Humain's rang-1 "Diversité" (p.46) — gated on actually owning
   // that capacité, not just being peuple=Humain, since the mage exception can replace it with
@@ -113,7 +145,7 @@ async function recomputeAndPersist(characterId) {
   const bouclierBonus = equipment.rows.find((r) => r.id === character.bouclier_id)?.defense_bonus || 0;
 
   const derived = computeDerivedStats(
-    profil.rows[0], character, parseInt(sortsCount.rows[0].count, 10),
+    profil.rows[0], character, sortsCountValue,
     humanOrigin.rows.length > 0, armureBonus, bouclierBonus
   );
 
@@ -423,7 +455,10 @@ router.post('/characters/:id/voies', async (req, res) => {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
-    const { voie_id, obtained_at_level, spend_points = true, rang = 1, rang_cap = null } = req.body;
+    const {
+      voie_id, obtained_at_level, spend_points = true, rang = 1, rang_cap = null,
+      only_capacite_id = null, nested_under_capacite_id = null,
+    } = req.body;
     if (!voie_id || !obtained_at_level) {
       return res.status(400).json({ error: 'voie_id et obtained_at_level requis' });
     }
@@ -494,11 +529,11 @@ router.post('/characters/:id/voies', async (req, res) => {
     }
 
     const result = await pool.query(
-      `INSERT INTO character_voies (character_id, voie_id, rang, rang_cap, obtained_at_level)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO character_voies (character_id, voie_id, rang, rang_cap, obtained_at_level, only_capacite_id, nested_under_capacite_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (character_id, voie_id) DO NOTHING
        RETURNING *`,
-      [req.params.id, voie_id, grantedRang, rang_cap, obtained_at_level]
+      [req.params.id, voie_id, grantedRang, rang_cap, obtained_at_level, only_capacite_id, nested_under_capacite_id]
     );
 
     if (spend_points && result.rows.length > 0) {

@@ -203,6 +203,14 @@ CREATE TABLE IF NOT EXISTS character_voies (
     rang INTEGER NOT NULL DEFAULT 1,
     rang_cap INTEGER, -- e.g. a peuple voie frozen at rang 1 after being replaced by the voie du mage
     obtained_at_level INTEGER NOT NULL,
+    -- Some capacités let a character fetch ONE specific capacité from elsewhere (e.g. the Gnome
+    -- peuple's rang-1 "Don étrange" lets you pick a rang-1 ensorceleur capacité) — rather than
+    -- show the whole donor voie as its own top-level entry, add it as a normal character_voies
+    -- row but restricted to only_capacite_id (hides every other capacité <= rang from that voie)
+    -- and flagged nested_under_capacite_id so the sheet renders it indented under the capacité
+    -- that granted it instead of as a separate accordion item.
+    only_capacite_id INTEGER REFERENCES rules_capacites(id) ON DELETE SET NULL,
+    nested_under_capacite_id INTEGER REFERENCES rules_capacites(id) ON DELETE SET NULL,
     UNIQUE (character_id, voie_id)
 );
 
