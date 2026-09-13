@@ -103,8 +103,13 @@ async function recomputeAndPersist(characterId) {
     [characterId]
   );
 
+  const armure = character.armure_id
+    ? await pool.query('SELECT defense_bonus FROM rules_armures WHERE id = $1', [character.armure_id])
+    : { rows: [] };
+
   const derived = computeDerivedStats(
-    profil.rows[0], character, parseInt(sortsCount.rows[0].count, 10), humanOrigin.rows.length > 0
+    profil.rows[0], character, parseInt(sortsCount.rows[0].count, 10),
+    humanOrigin.rows.length > 0, armure.rows[0]?.defense_bonus || 0
   );
 
   const pvGain = Math.max(0, derived.pv_max - character.pv_max);
@@ -263,7 +268,9 @@ router.get('/characters/:id', async (req, res) => {
  * PATCH /characters/:id
  * Updates character fields and recomputes derived stats (pv_max, pm_max, defense, etc.)
  * whenever profil, peuple, caracteristiques or level change.
- * Body: any subset of { name, profil_id, peuple_id, level, caracteristiques, equipement, notes, pv_current, pm_current, origine_humaine }
+ * Body: any subset of { name, profil_id, peuple_id, level, caracteristiques, equipement, notes, pv_current, pm_current, origine_humaine, armure_id }
+ * armure_id may be explicitly null (unequip) — unlike the other fields it isn't COALESCE'd,
+ * since that would make "unequip" indistinguishable from "field omitted, leave it alone".
  * GM only, additionally: { capacity_points_available, forgets_available, pv_body_total,
  * pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan } — raw ledger overrides for the GM editor
  * (fixing a mis-built character, migrating an existing PJ's real state, etc.). Silently ignored
@@ -284,8 +291,9 @@ router.patch('/characters/:id', async (req, res) => {
 
     const {
       name, profil_id, peuple_id, level, caracteristiques,
-      equipement, notes, pv_current, pm_current, origine_humaine,
+      equipement, notes, pv_current, pm_current, origine_humaine, armure_id,
     } = req.body;
+    const armureIdProvided = 'armure_id' in req.body;
     const {
       capacity_points_available, forgets_available, pv_body_total,
       pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan,
@@ -313,8 +321,9 @@ router.patch('/characters/:id', async (req, res) => {
          pc_bonus_orphan = COALESCE($13, pc_bonus_orphan),
          dr_bonus_orphan = COALESCE($14, dr_bonus_orphan),
          pm_bonus_orphan = COALESCE($15, pm_bonus_orphan),
-         origine_humaine = COALESCE($16, origine_humaine)
-       WHERE id = $17`,
+         origine_humaine = COALESCE($16, origine_humaine),
+         armure_id = CASE WHEN $17 THEN $18 ELSE armure_id END
+       WHERE id = $19`,
       [
         name, profil_id, peuple_id, level,
         caracteristiques ? JSON.stringify(caracteristiques) : null,
@@ -322,7 +331,7 @@ router.patch('/characters/:id', async (req, res) => {
         notes, pv_current, pm_current,
         capacity_points_available, forgets_available, pv_body_total,
         pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan,
-        origine_humaine,
+        origine_humaine, armureIdProvided, armure_id ?? null,
         req.params.id,
       ]
     );

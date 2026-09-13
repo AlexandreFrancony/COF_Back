@@ -95,6 +95,18 @@ CREATE TABLE IF NOT EXISTS rules_sorts (
     description TEXT NOT NULL
 );
 
+-- Deliberately minimal armor reference (name + flat DEF bonus only) — no weight category, AGI
+-- cap, or PM spellcasting surcharge (p.177-178's cross-restrictions stay out of scope, same
+-- call as profils hybrides: left to the GM's own judgment at the table). MJ-managed like a
+-- shared library (GET is open to any authenticated user, writes are GM-only) since exact COF2
+-- armor stats live in the rulebook, not something to hardcode guesses for here.
+CREATE TABLE IF NOT EXISTS rules_armures (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    defense_bonus INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ============================================================================
 -- CHARACTERS
 -- ============================================================================
@@ -120,6 +132,7 @@ CREATE TABLE IF NOT EXISTS characters (
     capacity_points_available INTEGER NOT NULL DEFAULT 0,
     valeurs_attaque JSONB NOT NULL DEFAULT '{}',
     equipement JSONB NOT NULL DEFAULT '[]',
+    armure_id INTEGER REFERENCES rules_armures(id) ON DELETE SET NULL, -- flat DEF bonus, see rules_armures
     notes TEXT,
     -- The human peuple's rang-1 "Diversité" capacité (p.46) requires picking a geographic/social
     -- origin (or a custom gagne-pain) — free text since the +3 bonus it grants is to narrative
