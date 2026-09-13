@@ -71,9 +71,15 @@ app.get('/health', async (req, res) => {
 app.use('/auth', authLimiter, authRouter);
 app.use('/campaigns', campaignsRouter);
 app.use('/', invitesRouter); // mounts /campaigns/:id/invites and /invites/:token
+// boardRouter must be mounted before charactersRouter: charactersRouter has a blanket
+// router.use(authenticateToken) (mounted at '/', so it runs for every path regardless of
+// whether any of its own routes match), which would otherwise 401 the board SSE stream —
+// the one endpoint that authenticates via a ?token= query param instead of a header, since
+// EventSource can't set one — before boardRouter's own bypass for it ever gets a chance to
+// run. Same failure mode already hit once before with scenariosRouter's blanket requireGm.
+app.use('/', boardRouter); // mounts /campaigns/:id/board and /board/tokens/:id
 app.use('/', charactersRouter); // mounts /campaigns/:id/characters and /characters/:id
 app.use('/rules', rulesRouter);
-app.use('/', boardRouter); // mounts /campaigns/:id/board and /board/tokens/:id
 app.use('/', boardMediaRouter); // mounts /board-media
 app.use('/', armuresRouter); // mounts /rules/armures
 app.use('/', armesRouter); // mounts /rules/armes
