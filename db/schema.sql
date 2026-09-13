@@ -83,6 +83,11 @@ CREATE TABLE IF NOT EXISTS rules_capacites (
     action_type VARCHAR(20) CHECK (action_type IN ('limitee', 'action', 'passive')),
     est_sort BOOLEAN NOT NULL DEFAULT false,
     description TEXT NOT NULL,
+    -- Short keyword-style summary shown everywhere a capacité is listed (character sheet,
+    -- level-up panel), so reading a build doesn't mean reading the full rulebook paragraph
+    -- every time. The full description stays the source of truth, always one click away via
+    -- the "glossaire des voies" page (a separate reference tab, not tied to any character).
+    resume VARCHAR(200),
     effect JSONB
 );
 
