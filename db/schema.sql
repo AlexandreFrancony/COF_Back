@@ -95,15 +95,19 @@ CREATE TABLE IF NOT EXISTS rules_sorts (
     description TEXT NOT NULL
 );
 
--- Deliberately minimal armor reference (name + flat DEF bonus only) — no weight category, AGI
--- cap, or PM spellcasting surcharge (p.177-178's cross-restrictions stay out of scope, same
--- call as profils hybrides: left to the GM's own judgment at the table). MJ-managed like a
--- shared library (GET is open to any authenticated user, writes are GM-only) since exact COF2
--- armor stats live in the rulebook, not something to hardcode guesses for here.
+-- Armures + boucliers (p.188) — a character can equip one of each (they stack). Only
+-- defense_bonus is actually applied by computeDefenseBase; agi_max and prix are reference
+-- info shown in the UI, not enforced — the AGI cap/encumbrance malus mechanic (p.188) and the
+-- PM spellcasting surcharge for an unauthorized armor (p.177-178) stay out of scope, same call
+-- as profils hybrides: left to the GM's own judgment at the table. Seeded from the rulebook's
+-- own table (not hardcoded guesses); the GM can still add homebrew entries via the same list.
 CREATE TABLE IF NOT EXISTS rules_armures (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
+    type VARCHAR(10) NOT NULL DEFAULT 'armure' CHECK (type IN ('armure', 'bouclier')),
     defense_bonus INTEGER NOT NULL DEFAULT 0,
+    agi_max INTEGER, -- informational only, e.g. 3 for "AGI max +3"
+    prix VARCHAR(20), -- informational only, e.g. "25 pa"
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -133,6 +137,7 @@ CREATE TABLE IF NOT EXISTS characters (
     valeurs_attaque JSONB NOT NULL DEFAULT '{}',
     equipement JSONB NOT NULL DEFAULT '[]',
     armure_id INTEGER REFERENCES rules_armures(id) ON DELETE SET NULL, -- flat DEF bonus, see rules_armures
+    bouclier_id INTEGER REFERENCES rules_armures(id) ON DELETE SET NULL, -- stacks with armure_id (p.188)
     notes TEXT,
     -- The human peuple's rang-1 "Diversité" capacité (p.46) requires picking a geographic/social
     -- origin (or a custom gagne-pain) — free text since the +3 bonus it grants is to narrative

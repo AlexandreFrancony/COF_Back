@@ -39,8 +39,8 @@ export function computeInitiative(per) {
   return 10 + per;
 }
 
-export function computeDefenseBase(agi, armureBonus = 0) {
-  return 10 + agi + armureBonus;
+export function computeDefenseBase(agi, armureBonus = 0, bouclierBonus = 0) {
+  return 10 + agi + armureBonus + bouclierBonus;
 }
 
 export function computeValeursAttaque(level, caracteristiques) {
@@ -64,11 +64,16 @@ export function computeValeursAttaque(level, caracteristiques) {
  * @param {boolean} hasHumanOrigin - owns the Voie de l'Humain's rang-1 "Diversité" capacité,
  *   which grants +1 PC on top of the usual formula (p.46) — the +3 to two narrative skill
  *   domains from the same capacité isn't tracked here, the app has no skill-check system.
- * @param {number} armureBonus - flat DEF bonus from the character's equipped rules_armures row
- *   (0 if none equipped) — no AGI cap or PM spellcasting surcharge, same deliberate scope cut
- *   as profils hybrides' armor/weapon cross-restrictions (p.177-178), left to the GM at the table.
+ * @param {number} armureBonus - flat DEF bonus from the character's equipped armor (rules_armures
+ *   type='armure', 0 if none) — stacks with bouclierBonus (p.188: armor + shield both apply).
+ *   No AGI cap or PM spellcasting surcharge, same deliberate scope cut as profils hybrides'
+ *   armor/weapon cross-restrictions (p.177-178), left to the GM at the table.
+ * @param {number} bouclierBonus - flat DEF bonus from the character's equipped shield
+ *   (rules_armures type='bouclier', 0 if none).
  */
-export function computeDerivedStats(familleRow, character, sortsCount, hasHumanOrigin = false, armureBonus = 0) {
+export function computeDerivedStats(
+  familleRow, character, sortsCount, hasHumanOrigin = false, armureBonus = 0, bouclierBonus = 0
+) {
   const { caracteristiques: c, level } = character;
   return {
     pv_max: character.pv_body_total + c.CON * level,
@@ -76,7 +81,7 @@ export function computeDerivedStats(familleRow, character, sortsCount, hasHumanO
     points_chance: computePc(c.CHA, familleRow.pc_bonus + character.pc_bonus_orphan + (hasHumanOrigin ? 1 : 0)),
     pm_max: computePmMax(sortsCount, c.VOL) + character.pm_bonus_orphan,
     initiative: computeInitiative(c.PER),
-    defense: computeDefenseBase(c.AGI, armureBonus),
+    defense: computeDefenseBase(c.AGI, armureBonus, bouclierBonus),
     valeurs_attaque: computeValeursAttaque(level, c),
   };
 }

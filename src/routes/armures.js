@@ -6,13 +6,13 @@ const router = Router();
 router.use(authenticateToken);
 
 /**
- * GET /rules/armures — any authenticated user. The shared armor library (name + flat DEF
- * bonus) a character can equip from. Deliberately minimal — see the schema.sql comment on
- * rules_armures for why there's no AGI cap or PM spellcasting surcharge.
+ * GET /rules/armures — any authenticated user. The shared armor + shield library (p.188) a
+ * character can equip one of each from. Seeded from the rulebook's own table; agi_max/prix
+ * are reference info only — see the schema.sql comment on rules_armures for what's enforced.
  */
 router.get('/rules/armures', async (req, res) => {
   try {
-    const armures = await pool.query('SELECT * FROM rules_armures ORDER BY name');
+    const armures = await pool.query('SELECT * FROM rules_armures ORDER BY type, defense_bonus');
     res.json(armures.rows);
   } catch (error) {
     console.error('Error GET rules/armures:', error.message);
@@ -21,16 +21,20 @@ router.get('/rules/armures', async (req, res) => {
 });
 
 /**
- * POST /rules/armures — GM only. Body: { name, defense_bonus }.
+ * POST /rules/armures — GM only. Body: { name, type ('armure'|'bouclier'), defense_bonus,
+ * agi_max, prix } — for adding a homebrew entry alongside the seeded rulebook ones.
  */
 router.post('/rules/armures', requireGm, async (req, res) => {
   try {
-    const { name, defense_bonus = 0 } = req.body;
+    const { name, type = 'armure', defense_bonus = 0, agi_max = null, prix = null } = req.body;
     if (!name) return res.status(400).json({ error: 'Nom requis' });
+    if (!['armure', 'bouclier'].includes(type)) {
+      return res.status(400).json({ error: "Type invalide (attendu 'armure' ou 'bouclier')" });
+    }
 
     const created = await pool.query(
-      'INSERT INTO rules_armures (name, defense_bonus) VALUES ($1, $2) RETURNING *',
-      [name, defense_bonus]
+      'INSERT INTO rules_armures (name, type, defense_bonus, agi_max, prix) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [name, type, defense_bonus, agi_max, prix]
     );
     res.status(201).json(created.rows[0]);
   } catch (error) {
