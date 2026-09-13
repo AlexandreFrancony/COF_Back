@@ -121,6 +121,11 @@ CREATE TABLE IF NOT EXISTS characters (
     valeurs_attaque JSONB NOT NULL DEFAULT '{}',
     equipement JSONB NOT NULL DEFAULT '[]',
     notes TEXT,
+    -- The human peuple's rang-1 "Diversité" capacité (p.46) requires picking a geographic/social
+    -- origin (or a custom gagne-pain) — free text since the +3 bonus it grants is to narrative
+    -- skill domains the app doesn't model; only the flat +1 PC it also grants is computed
+    -- (characterCalculations.js, gated on actually owning that capacité).
+    origine_humaine TEXT,
     -- PV ledger (replaces the old single-family closed formula so a profil hybride can mix
     -- families across levels, p.176-177): pv_max = pv_body_total + CON*level.
     pv_body_total INTEGER NOT NULL DEFAULT 0,

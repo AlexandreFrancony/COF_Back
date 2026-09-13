@@ -61,13 +61,16 @@ export function computeValeursAttaque(level, caracteristiques) {
  * @param {object} character - the characters row (caracteristiques, level, pv_body_total,
  *   pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan)
  * @param {number} sortsCount - number of spell-type capacités known
+ * @param {boolean} hasHumanOrigin - owns the Voie de l'Humain's rang-1 "Diversité" capacité,
+ *   which grants +1 PC on top of the usual formula (p.46) — the +3 to two narrative skill
+ *   domains from the same capacité isn't tracked here, the app has no skill-check system.
  */
-export function computeDerivedStats(familleRow, character, sortsCount) {
+export function computeDerivedStats(familleRow, character, sortsCount, hasHumanOrigin = false) {
   const { caracteristiques: c, level } = character;
   return {
     pv_max: character.pv_body_total + c.CON * level,
     de_recuperation: `${computeDrCount(c.CON, familleRow.dr_bonus + character.dr_bonus_orphan)}${familleRow.dr_die}`,
-    points_chance: computePc(c.CHA, familleRow.pc_bonus + character.pc_bonus_orphan),
+    points_chance: computePc(c.CHA, familleRow.pc_bonus + character.pc_bonus_orphan + (hasHumanOrigin ? 1 : 0)),
     pm_max: computePmMax(sortsCount, c.VOL) + character.pm_bonus_orphan,
     initiative: computeInitiative(c.PER),
     defense: computeDefenseBase(c.AGI),

@@ -94,7 +94,18 @@ async function recomputeAndPersist(characterId) {
     [characterId]
   );
 
-  const derived = computeDerivedStats(profil.rows[0], character, parseInt(sortsCount.rows[0].count, 10));
+  // The +1 PC from the Voie de l'Humain's rang-1 "Diversité" (p.46) — gated on actually owning
+  // that capacité, not just being peuple=Humain, since the mage exception can replace it with
+  // the voie du mage (though it keeps the rang-1 capacité, per p.60's own carve-out).
+  const humanOrigin = await pool.query(
+    `SELECT 1 FROM character_voies cv JOIN rules_voies v ON v.id = cv.voie_id
+     WHERE cv.character_id = $1 AND v.code = 'peuple-humain' AND cv.rang >= 1`,
+    [characterId]
+  );
+
+  const derived = computeDerivedStats(
+    profil.rows[0], character, parseInt(sortsCount.rows[0].count, 10), humanOrigin.rows.length > 0
+  );
 
   const pvGain = Math.max(0, derived.pv_max - character.pv_max);
   const pmGain = Math.max(0, derived.pm_max - character.pm_max);
@@ -252,7 +263,7 @@ router.get('/characters/:id', async (req, res) => {
  * PATCH /characters/:id
  * Updates character fields and recomputes derived stats (pv_max, pm_max, defense, etc.)
  * whenever profil, peuple, caracteristiques or level change.
- * Body: any subset of { name, profil_id, peuple_id, level, caracteristiques, equipement, notes, pv_current, pm_current }
+ * Body: any subset of { name, profil_id, peuple_id, level, caracteristiques, equipement, notes, pv_current, pm_current, origine_humaine }
  * GM only, additionally: { capacity_points_available, forgets_available, pv_body_total,
  * pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan } — raw ledger overrides for the GM editor
  * (fixing a mis-built character, migrating an existing PJ's real state, etc.). Silently ignored
@@ -273,7 +284,7 @@ router.patch('/characters/:id', async (req, res) => {
 
     const {
       name, profil_id, peuple_id, level, caracteristiques,
-      equipement, notes, pv_current, pm_current,
+      equipement, notes, pv_current, pm_current, origine_humaine,
     } = req.body;
     const {
       capacity_points_available, forgets_available, pv_body_total,
@@ -301,8 +312,9 @@ router.patch('/characters/:id', async (req, res) => {
          pv_body_total = COALESCE($12, pv_body_total),
          pc_bonus_orphan = COALESCE($13, pc_bonus_orphan),
          dr_bonus_orphan = COALESCE($14, dr_bonus_orphan),
-         pm_bonus_orphan = COALESCE($15, pm_bonus_orphan)
-       WHERE id = $16`,
+         pm_bonus_orphan = COALESCE($15, pm_bonus_orphan),
+         origine_humaine = COALESCE($16, origine_humaine)
+       WHERE id = $17`,
       [
         name, profil_id, peuple_id, level,
         caracteristiques ? JSON.stringify(caracteristiques) : null,
@@ -310,6 +322,7 @@ router.patch('/characters/:id', async (req, res) => {
         notes, pv_current, pm_current,
         capacity_points_available, forgets_available, pv_body_total,
         pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan,
+        origine_humaine,
         req.params.id,
       ]
     );
