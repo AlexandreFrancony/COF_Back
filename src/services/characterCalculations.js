@@ -77,7 +77,8 @@ export function computeDerivedStats(
   const { caracteristiques: c, level } = character;
   return {
     pv_max: character.pv_body_total + c.CON * level,
-    de_recuperation: `${computeDrCount(c.CON, familleRow.dr_bonus + character.dr_bonus_orphan)}${familleRow.dr_die}`,
+    dr_max: computeDrCount(c.CON, familleRow.dr_bonus + character.dr_bonus_orphan),
+    dr_die: familleRow.dr_die,
     points_chance: computePc(c.CHA, familleRow.pc_bonus + character.pc_bonus_orphan + (hasHumanOrigin ? 1 : 0)),
     pm_max: computePmMax(sortsCount, c.VOL) + character.pm_bonus_orphan,
     initiative: computeInitiative(c.PER),

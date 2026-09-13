@@ -151,7 +151,9 @@ CREATE TABLE IF NOT EXISTS characters (
     pm_max INTEGER NOT NULL DEFAULT 0,
     points_chance INTEGER NOT NULL DEFAULT 0, -- max, from the formula (p.29)
     points_chance_current INTEGER NOT NULL DEFAULT 0, -- spent/regained during play, like pv_current/pm_current
-    de_recuperation VARCHAR(10),
+    dr_max INTEGER NOT NULL DEFAULT 0, -- count of recovery dice, from the formula (p.22)
+    dr_current INTEGER NOT NULL DEFAULT 0, -- spent/regained during play, like pv_current/pm_current
+    dr_die VARCHAR(10), -- die size (e.g. 'd10'), fixed per the principal profil's famille
     defense INTEGER NOT NULL DEFAULT 0,
     initiative INTEGER NOT NULL DEFAULT 0,
     capacity_points_available INTEGER NOT NULL DEFAULT 0,
