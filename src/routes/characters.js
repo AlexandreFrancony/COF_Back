@@ -353,7 +353,7 @@ router.get('/characters/:id', async (req, res) => {
  * PATCH /characters/:id
  * Updates character fields and recomputes derived stats (pv_max, pm_max, defense, etc.)
  * whenever profil, peuple, caracteristiques or level change.
- * Body: any subset of { name, profil_id, peuple_id, level, caracteristiques, equipement, notes, pv_current, pm_current, points_chance_current, dr_current, origine_humaine, armure_id, bouclier_id, arme_principale_id, arme_secondaire_id }
+ * Body: any subset of { name, profil_id, peuple_id, level, caracteristiques, equipement, notes, pv_current, pm_current, points_chance_current, dr_current, origine_humaine, armure_id, bouclier_id, arme_principale_id, arme_secondaire_id, avatar_url, avatar_emoji, pieces_cuivre, pieces_argent, pieces_or, pieces_platine }
  * armure_id/bouclier_id/arme_principale_id/arme_secondaire_id may be explicitly null (unequip)
  * — unlike the other fields they aren't COALESCE'd, since that would make "unequip"
  * indistinguishable from "field omitted, leave it alone".
@@ -381,6 +381,7 @@ router.patch('/characters/:id', async (req, res) => {
       origine_humaine, armure_id, bouclier_id,
       arme_principale_id, arme_secondaire_id, custom_data,
       avatar_url, avatar_emoji,
+      pieces_cuivre, pieces_argent, pieces_or, pieces_platine,
     } = req.body;
     const armureIdProvided = 'armure_id' in req.body;
     const bouclierIdProvided = 'bouclier_id' in req.body;
@@ -427,8 +428,12 @@ router.patch('/characters/:id', async (req, res) => {
          arme_secondaire_id = CASE WHEN $25 THEN $26 ELSE arme_secondaire_id END,
          custom_data = custom_data || COALESCE($27::jsonb, '{}'::jsonb),
          avatar_url = CASE WHEN $28 THEN $29 WHEN $30 THEN NULL ELSE avatar_url END,
-         avatar_emoji = CASE WHEN $30 THEN $31 WHEN $28 THEN NULL ELSE avatar_emoji END
-       WHERE id = $32`,
+         avatar_emoji = CASE WHEN $30 THEN $31 WHEN $28 THEN NULL ELSE avatar_emoji END,
+         pieces_cuivre = COALESCE($32, pieces_cuivre),
+         pieces_argent = COALESCE($33, pieces_argent),
+         pieces_or = COALESCE($34, pieces_or),
+         pieces_platine = COALESCE($35, pieces_platine)
+       WHERE id = $36`,
       [
         name, profil_id, peuple_id, level,
         caracteristiques ? JSON.stringify(caracteristiques) : null,
@@ -443,6 +448,7 @@ router.patch('/characters/:id', async (req, res) => {
         custom_data ? JSON.stringify(custom_data) : null,
         avatarUrlProvided, avatar_url ?? null,
         avatarEmojiProvided, avatar_emoji ?? null,
+        pieces_cuivre, pieces_argent, pieces_or, pieces_platine,
         req.params.id,
       ]
     );

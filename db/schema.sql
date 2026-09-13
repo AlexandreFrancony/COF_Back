@@ -169,6 +169,12 @@ CREATE TABLE IF NOT EXISTS characters (
     capacity_points_available INTEGER NOT NULL DEFAULT 0,
     valeurs_attaque JSONB NOT NULL DEFAULT '{}',
     equipement JSONB NOT NULL DEFAULT '[]',
+    -- Currency kept separate from the free-text equipement list, one column per denomination
+    -- (p.23) — no conversion between them is modeled, the table tracks each pile as-is.
+    pieces_cuivre INTEGER NOT NULL DEFAULT 0,
+    pieces_argent INTEGER NOT NULL DEFAULT 0,
+    pieces_or INTEGER NOT NULL DEFAULT 0,
+    pieces_platine INTEGER NOT NULL DEFAULT 0,
     armure_id INTEGER REFERENCES rules_armures(id) ON DELETE SET NULL, -- flat DEF bonus, see rules_armures
     bouclier_id INTEGER REFERENCES rules_armures(id) ON DELETE SET NULL, -- stacks with armure_id (p.188)
     arme_principale_id INTEGER REFERENCES rules_armes(id) ON DELETE SET NULL,
