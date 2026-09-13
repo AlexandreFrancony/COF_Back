@@ -118,18 +118,20 @@ async function recomputeAndPersist(characterId) {
 
   const pvGain = Math.max(0, derived.pv_max - character.pv_max);
   const pmGain = Math.max(0, derived.pm_max - character.pm_max);
+  const pcGain = Math.max(0, derived.points_chance - character.points_chance);
 
   await pool.query(
     `UPDATE characters SET
        pv_max = $1, pm_max = $2, points_chance = $3, de_recuperation = $4,
        defense = $5, initiative = $6, valeurs_attaque = $7,
        pv_current = LEAST($1, pv_current + $8),
-       pm_current = LEAST($2, pm_current + $9)
+       pm_current = LEAST($2, pm_current + $9),
+       points_chance_current = LEAST($3, points_chance_current + $11)
      WHERE id = $10`,
     [
       derived.pv_max, derived.pm_max, derived.points_chance, derived.de_recuperation,
       derived.defense, derived.initiative, JSON.stringify(derived.valeurs_attaque),
-      pvGain, pmGain, characterId,
+      pvGain, pmGain, characterId, pcGain,
     ]
   );
 
@@ -272,7 +274,7 @@ router.get('/characters/:id', async (req, res) => {
  * PATCH /characters/:id
  * Updates character fields and recomputes derived stats (pv_max, pm_max, defense, etc.)
  * whenever profil, peuple, caracteristiques or level change.
- * Body: any subset of { name, profil_id, peuple_id, level, caracteristiques, equipement, notes, pv_current, pm_current, origine_humaine, armure_id, bouclier_id, arme_principale_id, arme_secondaire_id }
+ * Body: any subset of { name, profil_id, peuple_id, level, caracteristiques, equipement, notes, pv_current, pm_current, points_chance_current, origine_humaine, armure_id, bouclier_id, arme_principale_id, arme_secondaire_id }
  * armure_id/bouclier_id/arme_principale_id/arme_secondaire_id may be explicitly null (unequip)
  * — unlike the other fields they aren't COALESCE'd, since that would make "unequip"
  * indistinguishable from "field omitted, leave it alone".
@@ -296,7 +298,8 @@ router.patch('/characters/:id', async (req, res) => {
 
     const {
       name, profil_id, peuple_id, level, caracteristiques,
-      equipement, notes, pv_current, pm_current, origine_humaine, armure_id, bouclier_id,
+      equipement, notes, pv_current, pm_current, points_chance_current,
+      origine_humaine, armure_id, bouclier_id,
       arme_principale_id, arme_secondaire_id,
     } = req.body;
     const armureIdProvided = 'armure_id' in req.body;
@@ -324,23 +327,24 @@ router.patch('/characters/:id', async (req, res) => {
          notes = COALESCE($7, notes),
          pv_current = COALESCE($8, pv_current),
          pm_current = COALESCE($9, pm_current),
-         capacity_points_available = COALESCE($10, capacity_points_available),
-         forgets_available = COALESCE($11, forgets_available),
-         pv_body_total = COALESCE($12, pv_body_total),
-         pc_bonus_orphan = COALESCE($13, pc_bonus_orphan),
-         dr_bonus_orphan = COALESCE($14, dr_bonus_orphan),
-         pm_bonus_orphan = COALESCE($15, pm_bonus_orphan),
-         origine_humaine = COALESCE($16, origine_humaine),
-         armure_id = CASE WHEN $17 THEN $18 ELSE armure_id END,
-         bouclier_id = CASE WHEN $19 THEN $20 ELSE bouclier_id END,
-         arme_principale_id = CASE WHEN $21 THEN $22 ELSE arme_principale_id END,
-         arme_secondaire_id = CASE WHEN $23 THEN $24 ELSE arme_secondaire_id END
-       WHERE id = $25`,
+         points_chance_current = COALESCE($10, points_chance_current),
+         capacity_points_available = COALESCE($11, capacity_points_available),
+         forgets_available = COALESCE($12, forgets_available),
+         pv_body_total = COALESCE($13, pv_body_total),
+         pc_bonus_orphan = COALESCE($14, pc_bonus_orphan),
+         dr_bonus_orphan = COALESCE($15, dr_bonus_orphan),
+         pm_bonus_orphan = COALESCE($16, pm_bonus_orphan),
+         origine_humaine = COALESCE($17, origine_humaine),
+         armure_id = CASE WHEN $18 THEN $19 ELSE armure_id END,
+         bouclier_id = CASE WHEN $20 THEN $21 ELSE bouclier_id END,
+         arme_principale_id = CASE WHEN $22 THEN $23 ELSE arme_principale_id END,
+         arme_secondaire_id = CASE WHEN $24 THEN $25 ELSE arme_secondaire_id END
+       WHERE id = $26`,
       [
         name, profil_id, peuple_id, level,
         caracteristiques ? JSON.stringify(caracteristiques) : null,
         equipement ? JSON.stringify(equipement) : null,
-        notes, pv_current, pm_current,
+        notes, pv_current, pm_current, points_chance_current,
         capacity_points_available, forgets_available, pv_body_total,
         pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan,
         origine_humaine, armureIdProvided, armure_id ?? null,

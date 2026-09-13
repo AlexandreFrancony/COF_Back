@@ -149,7 +149,8 @@ CREATE TABLE IF NOT EXISTS characters (
     pv_max INTEGER NOT NULL DEFAULT 0,
     pm_current INTEGER NOT NULL DEFAULT 0,
     pm_max INTEGER NOT NULL DEFAULT 0,
-    points_chance INTEGER NOT NULL DEFAULT 0,
+    points_chance INTEGER NOT NULL DEFAULT 0, -- max, from the formula (p.29)
+    points_chance_current INTEGER NOT NULL DEFAULT 0, -- spent/regained during play, like pv_current/pm_current
     de_recuperation VARCHAR(10),
     defense INTEGER NOT NULL DEFAULT 0,
     initiative INTEGER NOT NULL DEFAULT 0,
