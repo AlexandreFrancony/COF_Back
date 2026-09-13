@@ -37,6 +37,17 @@ async function ownedScenario(scenarioId, gmId) {
   return result.rows[0] || null;
 }
 
+async function getScenarioRow(scenarioId) {
+  const result = await pool.query(
+    `SELECT s.*, m.url AS background_url, m.type AS background_type
+     FROM campaign_scenarios s
+     LEFT JOIN board_media m ON m.id = s.background_media_id
+     WHERE s.id = $1`,
+    [scenarioId]
+  );
+  return result.rows[0] || null;
+}
+
 async function attachTokens(scenarioRows) {
   if (scenarioRows.length === 0) return [];
   const tokens = await pool.query(
@@ -110,11 +121,11 @@ router.patch('/scenarios/:id', requireGm, async (req, res) => {
          background_media_id = COALESCE($3, s.background_media_id)
        FROM campaigns c
        WHERE s.id = $4 AND s.campaign_id = c.id AND c.gm_id = $5
-       RETURNING s.*`,
+       RETURNING s.id`,
       [name, notes, background_media_id, req.params.id, req.user.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Scénario non trouvé' });
-    res.json((await attachTokens(result.rows))[0]);
+    res.json((await attachTokens([await getScenarioRow(result.rows[0].id)]))[0]);
   } catch (error) {
     console.error('Error PATCH /scenarios/:id:', error.message);
     res.status(500).json({ error: 'Erreur lors de la mise à jour' });
@@ -160,13 +171,7 @@ router.post('/scenarios/:id/tokens', requireGm, async (req, res) => {
       [req.params.id, character_id || null, label, image_url || null, color, x, y, visible_to_players]
     );
 
-    const scenario = await pool.query(
-      `SELECT s.*, m.url AS background_url, m.type AS background_type
-       FROM campaign_scenarios s LEFT JOIN board_media m ON m.id = s.background_media_id
-       WHERE s.id = $1`,
-      [req.params.id]
-    );
-    res.status(201).json((await attachTokens(scenario.rows))[0]);
+    res.status(201).json((await attachTokens([await getScenarioRow(req.params.id)]))[0]);
   } catch (error) {
     console.error('Error POST /scenarios/:id/tokens:', error.message);
     res.status(500).json({ error: "Erreur lors de l'ajout du pion" });
@@ -230,13 +235,7 @@ router.post('/scenarios/:id/launch', requireGm, async (req, res) => {
     const scenario = await ownedScenario(req.params.id, req.user.id);
     if (!scenario) return res.status(404).json({ error: 'Scénario non trouvé' });
 
-    const detail = await pool.query(
-      `SELECT s.*, m.url AS background_url, m.type AS background_type
-       FROM campaign_scenarios s LEFT JOIN board_media m ON m.id = s.background_media_id
-       WHERE s.id = $1`,
-      [req.params.id]
-    );
-    const [full] = await attachTokens(detail.rows);
+    const [full] = await attachTokens([await getScenarioRow(req.params.id)]);
 
     const board = await getOrCreateBoard(scenario.campaign_id);
 
