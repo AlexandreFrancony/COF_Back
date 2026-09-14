@@ -8,6 +8,7 @@ import {
   computeDerivedStats, computePvBodyGain, seedPvBodyTotal, NIVEAU_REQUIS_PAR_RANG,
 } from '../services/characterCalculations.js';
 import { logEvent } from '../services/eventLog.js';
+import { notifyCampaign } from '../services/discordWebhook.js';
 import { hasSubscribers, broadcastBoard } from '../services/boardStream.js';
 import { getFullBoard, buildBoardForRole } from './board.js';
 
@@ -471,6 +472,9 @@ router.patch('/characters/:id', async (req, res) => {
         const delta = pv_current - character.pv_current;
         await logEvent(character.campaign_id, character.id, 'pv_change',
           `${character.name} : PV ${character.pv_current} → ${pv_current} (${delta > 0 ? '+' : ''}${delta})`);
+        if (pv_current === 0 && character.pv_current > 0) {
+          await notifyCampaign(character.campaign_id, `💀 **${character.name}** tombe à terre (0 PV) !`);
+        }
       }
       if (pm_current !== undefined && pm_current !== character.pm_current) {
         const delta = pm_current - character.pm_current;
@@ -733,6 +737,7 @@ router.post('/characters/:id/level-up', async (req, res) => {
     const updated = await recomputeAndPersist(req.params.id);
     await logEvent(character.campaign_id, character.id, 'level_up',
       `${character.name} passe au niveau ${character.level + 1}`);
+    await notifyCampaign(character.campaign_id, `🎉 **${character.name}** passe au niveau ${character.level + 1} !`);
     res.json(updated);
   } catch (error) {
     console.error('Error POST /characters/:id/level-up:', error.message);

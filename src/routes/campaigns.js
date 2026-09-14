@@ -89,18 +89,22 @@ router.get('/:id', async (req, res) => {
 /**
  * PATCH /campaigns/:id
  * GM only, must own the campaign.
+ * discord_webhook_url may be explicitly null (remove it) — unlike name/description, it isn't
+ * COALESCE'd, since that would make "clear it" indistinguishable from "field omitted".
  */
 router.patch('/:id', requireGm, async (req, res) => {
   try {
-    const { name, description } = req.body;
+    const { name, description, discord_webhook_url } = req.body;
+    const webhookProvided = Object.prototype.hasOwnProperty.call(req.body, 'discord_webhook_url');
 
     const result = await pool.query(
       `UPDATE campaigns SET
          name = COALESCE($1, name),
-         description = COALESCE($2, description)
-       WHERE id = $3 AND gm_id = $4
+         description = COALESCE($2, description),
+         discord_webhook_url = CASE WHEN $3 THEN $4 ELSE discord_webhook_url END
+       WHERE id = $5 AND gm_id = $6
        RETURNING *`,
-      [name, description, req.params.id, req.user.id]
+      [name, description, webhookProvided, discord_webhook_url || null, req.params.id, req.user.id]
     );
 
     if (result.rows.length === 0) {

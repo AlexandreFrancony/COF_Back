@@ -19,6 +19,7 @@ import armuresRouter from './routes/armures.js';
 import armesRouter from './routes/armes.js';
 import scenariosRouter from './routes/scenarios.js';
 import eventsRouter from './routes/events.js';
+import notesRouter from './routes/notes.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -78,6 +79,8 @@ app.use('/', invitesRouter); // mounts /campaigns/:id/invites and /invites/:toke
 // EventSource can't set one — before boardRouter's own bypass for it ever gets a chance to
 // run. Same failure mode already hit once before with scenariosRouter's blanket requireGm.
 app.use('/', boardRouter); // mounts /campaigns/:id/board and /board/tokens/:id
+// Same reasoning as boardRouter above, for notesRouter's own /notes-stream/:id SSE route.
+app.use('/', notesRouter); // mounts /campaigns/:id/notes and /notes-stream/:id
 app.use('/', charactersRouter); // mounts /campaigns/:id/characters and /characters/:id
 app.use('/rules', rulesRouter);
 app.use('/', boardMediaRouter); // mounts /board-media

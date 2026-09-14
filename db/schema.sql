@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS users (
     role VARCHAR(20) NOT NULL DEFAULT 'player' CHECK (role IN ('gm', 'player')),
     reset_token VARCHAR(64),
     reset_token_expiry TIMESTAMP,
+    discord_id VARCHAR(32) UNIQUE,
+    discord_username VARCHAR(100),
+    discord_avatar_hash VARCHAR(64),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -21,6 +24,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     gm_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     description TEXT,
+    discord_webhook_url TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -30,6 +34,17 @@ CREATE TABLE IF NOT EXISTS campaign_scenarios (
     name VARCHAR(255) NOT NULL,
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- One shared scratchpad per campaign, editable by the GM and every player with a character in
+-- it — a common knowledge base built live during sessions (NPC names, clues, decisions...).
+-- Unlike campaign_scenarios.notes (GM-only prep, never shown to players), this is the same
+-- single document for everyone, last-write-wins.
+CREATE TABLE IF NOT EXISTS campaign_notes (
+    campaign_id INTEGER PRIMARY KEY REFERENCES campaigns(id) ON DELETE CASCADE,
+    content TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMP,
+    updated_by VARCHAR(100)
 );
 
 -- ============================================================================

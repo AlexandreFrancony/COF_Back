@@ -155,7 +155,7 @@ router.get('/invites/:token', async (req, res) => {
   }
 });
 
-async function claimCharacter(userId, characterId, inviteId) {
+export async function claimCharacter(userId, characterId, inviteId) {
   await pool.query('UPDATE characters SET user_id = $1 WHERE id = $2', [userId, characterId]);
   await pool.query(
     `UPDATE campaign_invites SET status = 'accepted', accepted_at = CURRENT_TIMESTAMP WHERE id = $1`,
