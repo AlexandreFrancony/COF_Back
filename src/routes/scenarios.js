@@ -51,8 +51,19 @@ async function getScenarioRow(scenarioId) {
 async function attachTokens(scenarioRows) {
   if (scenarioRows.length === 0) return [];
   const tokens = await pool.query(
-    `SELECT t.*, c.avatar_url AS character_avatar_url, c.avatar_emoji AS character_avatar_emoji
-     FROM scenario_tokens t LEFT JOIN characters c ON c.id = t.character_id
+    `SELECT t.*, c.avatar_url AS character_avatar_url, c.avatar_emoji AS character_avatar_emoji,
+            owner.name AS owner_character_name,
+            ogv.rang AS owner_golem_rang,
+            (owner.valeurs_attaque->>'magique')::int AS owner_attaque_magique
+     FROM scenario_tokens t
+     LEFT JOIN characters c ON c.id = t.character_id
+     LEFT JOIN characters owner ON owner.id = t.owner_character_id
+     LEFT JOIN LATERAL (
+       SELECT cv.rang FROM character_voies cv
+       JOIN rules_voies v ON v.id = cv.voie_id
+       WHERE cv.character_id = owner.id AND v.name = 'Voie du golem'
+       LIMIT 1
+     ) ogv ON true
      WHERE t.scenario_id = ANY($1) ORDER BY t.id`,
     [scenarioRows.map((s) => s.id)]
   );
@@ -192,13 +203,13 @@ router.post('/scenarios/:id/tokens', requireGm, async (req, res) => {
       return res.status(404).json({ error: 'Scénario non trouvé' });
     }
 
-    const { label, character_id, image_url, color, x, y, visible_to_players, hp_max } = req.body;
+    const { label, character_id, image_url, color, x, y, visible_to_players, hp_max, owner_character_id } = req.body;
     if (!label) return res.status(400).json({ error: 'Nom du pion requis' });
 
     await pool.query(
-      `INSERT INTO scenario_tokens (scenario_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max)
-       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true), $9, $9)`,
-      [req.params.id, character_id || null, label, image_url || null, color, x, y, visible_to_players, hp_max || null]
+      `INSERT INTO scenario_tokens (scenario_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id)
+       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true), $9, $9, $10)`,
+      [req.params.id, character_id || null, label, image_url || null, color, x, y, visible_to_players, hp_max || null, owner_character_id || null]
     );
 
     res.status(201).json((await enrichScenarios([await getScenarioRow(req.params.id)]))[0]);
@@ -380,9 +391,9 @@ router.post('/scenarios/:id/launch', requireGm, async (req, res) => {
 
     for (const t of full.tokens) {
       await pool.query(
-        `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [board.id, t.character_id, t.label, t.image_url, t.color, t.x, t.y, t.visible_to_players, t.hp_current, t.hp_max]
+        `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [board.id, t.character_id, t.label, t.image_url, t.color, t.x, t.y, t.visible_to_players, t.hp_current, t.hp_max, t.owner_character_id]
       );
     }
 

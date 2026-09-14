@@ -47,9 +47,19 @@ export async function getFullBoard(campaignId) {
       `SELECT bt.*, c.name AS character_name, c.is_npc,
               c.pv_current, c.pv_max, c.pm_current, c.pm_max,
               c.points_chance, c.defense, c.initiative, c.caracteristiques,
-              c.avatar_url AS character_avatar_url, c.avatar_emoji AS character_avatar_emoji
+              c.avatar_url AS character_avatar_url, c.avatar_emoji AS character_avatar_emoji,
+              owner.name AS owner_character_name,
+              ogv.rang AS owner_golem_rang,
+              (owner.valeurs_attaque->>'magique')::int AS owner_attaque_magique
        FROM board_tokens bt
        LEFT JOIN characters c ON c.id = bt.character_id
+       LEFT JOIN characters owner ON owner.id = bt.owner_character_id
+       LEFT JOIN LATERAL (
+         SELECT cv.rang FROM character_voies cv
+         JOIN rules_voies v ON v.id = cv.voie_id
+         WHERE cv.character_id = owner.id AND v.name = 'Voie du golem'
+         LIMIT 1
+       ) ogv ON true
        WHERE bt.board_state_id = $1 ORDER BY bt.id`,
       [board.id]
     ),
@@ -193,16 +203,16 @@ router.post('/campaigns/:campaignId/board/tokens', requireGm, async (req, res) =
     if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
 
     const board = await getOrCreateBoard(req.params.campaignId);
-    const { label, character_id, image_url, color, x, y, visible_to_players, hp_max } = req.body;
+    const { label, character_id, image_url, color, x, y, visible_to_players, hp_max, owner_character_id } = req.body;
 
     if (!label) return res.status(400).json({ error: 'Nom du pion requis' });
 
     // A creature pawn (no character_id) can start with its own PV — hp_current always starts
     // full at hp_max, there's no partial-health-on-creation use case.
     await pool.query(
-      `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max)
-       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true), $9, $9)`,
-      [board.id, character_id || null, label, image_url || null, color, x, y, visible_to_players, hp_max || null]
+      `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id)
+       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true), $9, $9, $10)`,
+      [board.id, character_id || null, label, image_url || null, color, x, y, visible_to_players, hp_max || null, owner_character_id || null]
     );
 
     const fullBoard = await getFullBoard(req.params.campaignId);

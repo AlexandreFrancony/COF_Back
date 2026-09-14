@@ -336,6 +336,13 @@ ALTER TABLE board_tokens ADD COLUMN IF NOT EXISTS hp_max INTEGER;
 ALTER TABLE scenario_tokens ADD COLUMN IF NOT EXISTS hp_current INTEGER;
 ALTER TABLE scenario_tokens ADD COLUMN IF NOT EXISTS hp_max INTEGER;
 
+-- Which character a creature pawn belongs to (e.g. a golem's forgesort) — distinct from
+-- character_id, which would make the pawn look like that character's own token. Lets the HUD
+-- nest the creature's card under its owner's, and lets the board compute owner-derived stats
+-- (a golem's DEF/attack come from its forgesort, not from the pawn itself).
+ALTER TABLE board_tokens ADD COLUMN IF NOT EXISTS owner_character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL;
+ALTER TABLE scenario_tokens ADD COLUMN IF NOT EXISTS owner_character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL;
+
 -- Area-of-effect markers (explosion, cone, line...) drawn over the board, same visibility
 -- model as tokens. x/y is the anchor point (center for circle, origin for rectangle/cone);
 -- size/width are percentages of the board width; rotation in degrees orients rectangle/cone.
