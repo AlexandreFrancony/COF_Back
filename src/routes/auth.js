@@ -117,6 +117,38 @@ router.get('/me', authenticateToken, async (req, res) => {
 });
 
 /**
+ * PATCH /auth/display-name
+ * Body: { display_name }
+ * generateToken() embeds display_name in the JWT payload itself, so every existing token
+ * out there would keep showing the old name (in campaign_notes.updated_by, Discord webhook
+ * messages, etc. - anywhere reading req.user.display_name straight from the token) until it
+ * expired. Re-issuing a fresh token here and having the caller swap it in immediately (same
+ * shape as /login's response) avoids that staleness instead of just living with it.
+ */
+router.patch('/display-name', authenticateToken, async (req, res) => {
+  try {
+    const displayName = (req.body.display_name || '').trim();
+    if (!displayName) {
+      return res.status(400).json({ error: 'Nom d\'affichage requis' });
+    }
+    if (displayName.length > 100) {
+      return res.status(400).json({ error: 'Nom d\'affichage trop long (100 caractères max)' });
+    }
+
+    const result = await pool.query(
+      'UPDATE users SET display_name = $1 WHERE id = $2 RETURNING id, email, display_name, role',
+      [displayName, req.user.id]
+    );
+    const user = result.rows[0];
+
+    res.json({ user, token: generateToken(user) });
+  } catch (error) {
+    console.error('Error PATCH /auth/display-name:', error.message);
+    res.status(500).json({ error: "Erreur lors du changement de nom" });
+  }
+});
+
+/**
  * PATCH /auth/password
  * Body: { currentPassword, newPassword }
  * Self-service change while logged in — see /forgot-password below for the logged-out case.
@@ -188,12 +220,12 @@ router.post('/forgot-password', async (req, res) => {
     await transporter.sendMail({
       from: process.env.SMTP_FROM || 'tipsy@francony.fr',
       to: user.email,
-      subject: '📖 COF — Réinitialisation de mot de passe',
+      subject: "📖 As I've Written — Réinitialisation de mot de passe",
       html: `
         <div style="font-family: Georgia, serif; max-width: 600px; margin: 0 auto; color: #2A2013;">
           <h2 style="color: #A9853D;">Réinitialisation de mot de passe</h2>
           <p>Bonjour <strong>${user.display_name}</strong>,</p>
-          <p>Vous avez demandé à réinitialiser votre mot de passe sur le site MJ COF.</p>
+          <p>Vous avez demandé à réinitialiser votre mot de passe sur As I've Written.</p>
           <p style="text-align: center; margin: 30px 0;">
             <a href="${resetUrl}"
                style="background-color: #A9853D; color: white; padding: 12px 24px;
