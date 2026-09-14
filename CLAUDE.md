@@ -52,6 +52,7 @@ Les tables `rules_familles`, `rules_profils`, `rules_peuples`, `rules_voies`, `r
 | JWT_SECRET | Secret de signature JWT | - |
 | JWT_EXPIRES_IN | Durée de validité du token | 30d |
 | FRONTEND_URL | URL du frontend (CORS prod) | https://jdr.francony.fr |
+| SMTP_HOST / SMTP_PORT / SMTP_SECURE / SMTP_USER / SMTP_PASS / SMTP_FROM | Envoi d'email (mot de passe oublié) — mailbox OVH `tipsy@francony.fr`, partagée avec Bartending | - |
 
 ## Commandes
 
