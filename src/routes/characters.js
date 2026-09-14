@@ -284,11 +284,26 @@ router.get('/campaigns/:campaignId/characters', async (req, res) => {
       return res.status(404).json({ error: 'Campagne non trouvée' });
     }
 
+    // golem_rang: the character's rang in "Voie du golem" if they have it, else null — lets
+    // the board's "+ Golem" shortcut (BoardEditor.jsx) know who can summon one and at what
+    // rang (the Golem capacité itself only unlocks at rang 2, checked client-side).
+    const golemJoin = `
+      LEFT JOIN LATERAL (
+        SELECT cv.rang FROM character_voies cv
+        JOIN rules_voies v ON v.id = cv.voie_id
+        WHERE cv.character_id = c.id AND v.name = 'Voie du golem'
+        LIMIT 1
+      ) gv ON true`;
     const isGm = req.user.role === 'gm' && campaign.rows[0].gm_id === req.user.id;
     const result = isGm
-      ? await pool.query('SELECT * FROM characters WHERE campaign_id = $1 ORDER BY name', [req.params.campaignId])
+      ? await pool.query(
+          `SELECT c.*, gv.rang AS golem_rang FROM characters c ${golemJoin}
+           WHERE c.campaign_id = $1 ORDER BY c.name`,
+          [req.params.campaignId]
+        )
       : await pool.query(
-          'SELECT * FROM characters WHERE campaign_id = $1 AND user_id = $2 ORDER BY name',
+          `SELECT c.*, gv.rang AS golem_rang FROM characters c ${golemJoin}
+           WHERE c.campaign_id = $1 AND c.user_id = $2 ORDER BY c.name`,
           [req.params.campaignId, req.user.id]
         );
 
