@@ -53,4 +53,20 @@ router.post('/campaigns/:campaignId/events', requireGm, async (req, res) => {
   }
 });
 
+/**
+ * DELETE /campaigns/:campaignId/events — GM only, clears the whole log for this campaign.
+ */
+router.delete('/campaigns/:campaignId/events', requireGm, async (req, res) => {
+  try {
+    const campaign = await findAccessibleCampaign(req.params.campaignId, req.user);
+    if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
+
+    await pool.query('DELETE FROM session_events WHERE campaign_id = $1', [req.params.campaignId]);
+    res.status(204).end();
+  } catch (error) {
+    console.error('Error DELETE /campaigns/:campaignId/events:', error.message);
+    res.status(500).json({ error: "Erreur lors de la suppression de l'historique" });
+  }
+});
+
 export default router;
