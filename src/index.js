@@ -20,6 +20,7 @@ import armesRouter from './routes/armes.js';
 import scenariosRouter from './routes/scenarios.js';
 import eventsRouter from './routes/events.js';
 import notesRouter from './routes/notes.js';
+import sseStreamsRouter from './routes/sseStreams.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -69,18 +70,17 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// Mounted first, before every blanket-authenticateToken router below: its two routes
+// (board-stream, notes-stream) authenticate via ?token= instead of a header, since
+// EventSource can't set one. See sseStreams.js for why this had to become its own router
+// instead of living inside board.js/notes.js each behind a local bypass — that pattern
+// silently breaks the moment more than one such router exists.
+app.use('/', sseStreamsRouter);
 app.use('/auth', authLimiter, authRouter);
 app.use('/campaigns', campaignsRouter);
 app.use('/', invitesRouter); // mounts /campaigns/:id/invites and /invites/:token
-// boardRouter must be mounted before charactersRouter: charactersRouter has a blanket
-// router.use(authenticateToken) (mounted at '/', so it runs for every path regardless of
-// whether any of its own routes match), which would otherwise 401 the board SSE stream —
-// the one endpoint that authenticates via a ?token= query param instead of a header, since
-// EventSource can't set one — before boardRouter's own bypass for it ever gets a chance to
-// run. Same failure mode already hit once before with scenariosRouter's blanket requireGm.
 app.use('/', boardRouter); // mounts /campaigns/:id/board and /board/tokens/:id
-// Same reasoning as boardRouter above, for notesRouter's own /notes-stream/:id SSE route.
-app.use('/', notesRouter); // mounts /campaigns/:id/notes and /notes-stream/:id
+app.use('/', notesRouter); // mounts /campaigns/:id/notes
 app.use('/', charactersRouter); // mounts /campaigns/:id/characters and /characters/:id
 app.use('/rules', rulesRouter);
 app.use('/', boardMediaRouter); // mounts /board-media

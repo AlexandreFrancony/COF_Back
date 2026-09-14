@@ -2,11 +2,10 @@ import { Router } from 'express';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
-import jwt from 'jsonwebtoken';
 import pool from '../db/pool.js';
 import { authenticateToken, requireGm } from '../middleware/auth.js';
 import { findAccessibleCampaign } from './campaigns.js';
-import { subscribe, broadcastBoard } from '../services/boardStream.js';
+import { broadcastBoard } from '../services/boardStream.js';
 
 const router = Router();
 
@@ -81,20 +80,17 @@ export function buildBoardForRole(board, role) {
   };
 }
 
-async function resolveRole(campaignId, user) {
+// Exported for sseStreams.js — board-stream needs the exact same access check as the plain
+// GET below, but as its own route living outside any blanket-authenticateToken router (see
+// sseStreams.js for why: EventSource can't send an Authorization header, so a router-level
+// blanket auth would 401 it before its own bypass, if any, ever got a chance to run).
+export async function resolveRole(campaignId, user) {
   const campaign = await findAccessibleCampaign(campaignId, user);
   if (!campaign) return null;
   return campaign.gm_id === user.id ? 'gm' : 'player';
 }
 
-// campaignsRouter is mounted at '/campaigns' with a blanket authenticateToken that runs for
-// every sub-path regardless of route match — so the SSE stream (which authenticates via a
-// query-string token, since EventSource can't set headers) must live outside that prefix,
-// otherwise campaignsRouter's header-based auth middleware 401s it before it ever gets here.
-router.use((req, res, next) => {
-  if (req.path.startsWith('/board-stream/')) return next();
-  authenticateToken(req, res, next);
-});
+router.use(authenticateToken);
 
 /**
  * GET /campaigns/:campaignId/board
@@ -109,44 +105,6 @@ router.get('/campaigns/:campaignId/board', async (req, res) => {
   } catch (error) {
     console.error('Error GET board:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-/**
- * GET /board-stream/:campaignId — SSE, token passed as ?token=
- */
-router.get('/board-stream/:campaignId', async (req, res) => {
-  try {
-    const token = req.query.token;
-    if (!token) return res.status(401).end();
-
-    let user;
-    try {
-      user = jwt.verify(token, process.env.JWT_SECRET);
-    } catch {
-      return res.status(403).end();
-    }
-
-    const role = await resolveRole(req.params.campaignId, user);
-    if (!role) return res.status(404).end();
-
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    });
-    res.write(':ok\n\n');
-
-    const board = await getFullBoard(req.params.campaignId);
-    res.write(`event: board\ndata: ${JSON.stringify(buildBoardForRole(board, role))}\n\n`);
-
-    subscribe(req.params.campaignId, role, res);
-
-    const heartbeat = setInterval(() => res.write(':ping\n\n'), 25000);
-    req.on('close', () => clearInterval(heartbeat));
-  } catch (error) {
-    console.error('Error SSE board stream:', error.message);
-    res.status(500).end();
   }
 });
 
