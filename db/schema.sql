@@ -328,6 +328,14 @@ CREATE TABLE IF NOT EXISTS scenario_tokens (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- A pawn can optionally track its own PV, for a GM-controlled creature/summon (e.g. a golem
+-- or familiar) that isn't a full character — no profil/voies, just a life bar under the pawn.
+-- NULL (the default) means "no PV tracking", a plain decorative pawn like before this existed.
+ALTER TABLE board_tokens ADD COLUMN IF NOT EXISTS hp_current INTEGER;
+ALTER TABLE board_tokens ADD COLUMN IF NOT EXISTS hp_max INTEGER;
+ALTER TABLE scenario_tokens ADD COLUMN IF NOT EXISTS hp_current INTEGER;
+ALTER TABLE scenario_tokens ADD COLUMN IF NOT EXISTS hp_max INTEGER;
+
 -- Area-of-effect markers (explosion, cone, line...) drawn over the board, same visibility
 -- model as tokens. x/y is the anchor point (center for circle, origin for rectangle/cone);
 -- size/width are percentages of the board width; rotation in degrees orients rectangle/cone.

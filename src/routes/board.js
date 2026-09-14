@@ -193,14 +193,16 @@ router.post('/campaigns/:campaignId/board/tokens', requireGm, async (req, res) =
     if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
 
     const board = await getOrCreateBoard(req.params.campaignId);
-    const { label, character_id, image_url, color, x, y, visible_to_players } = req.body;
+    const { label, character_id, image_url, color, x, y, visible_to_players, hp_max } = req.body;
 
     if (!label) return res.status(400).json({ error: 'Nom du pion requis' });
 
+    // A creature pawn (no character_id) can start with its own PV — hp_current always starts
+    // full at hp_max, there's no partial-health-on-creation use case.
     await pool.query(
-      `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players)
-       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true))`,
-      [board.id, character_id || null, label, image_url || null, color, x, y, visible_to_players]
+      `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max)
+       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true), $9, $9)`,
+      [board.id, character_id || null, label, image_url || null, color, x, y, visible_to_players, hp_max || null]
     );
 
     const fullBoard = await getFullBoard(req.params.campaignId);
@@ -229,7 +231,11 @@ router.patch('/board/tokens/:tokenId', requireGm, async (req, res) => {
     const campaign = await findAccessibleCampaign(campaign_id, req.user);
     if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
 
-    const { label, image_url, color, x, y, visible_to_players } = req.body;
+    const { label, image_url, color, x, y, visible_to_players, hp_delta } = req.body;
+    // hp_delta (not an absolute value) applies atomically in SQL, same reasoning as board_zones'
+    // size_delta — a GM clicking a creature's PV +/- rapidly would otherwise drop in-flight
+    // clicks fired before the previous response's state lands. Clamped to [0, hp_max]; a no-op
+    // (CASE ... ELSE hp_current) for a plain pawn that never had hp_max set.
     await pool.query(
       `UPDATE board_tokens SET
          label = COALESCE($1, label),
@@ -237,9 +243,14 @@ router.patch('/board/tokens/:tokenId', requireGm, async (req, res) => {
          color = COALESCE($3, color),
          x = COALESCE($4, x),
          y = COALESCE($5, y),
-         visible_to_players = COALESCE($6, visible_to_players)
-       WHERE id = $7`,
-      [label, image_url, color, x, y, visible_to_players, req.params.tokenId]
+         visible_to_players = COALESCE($6, visible_to_players),
+         hp_current = CASE
+           WHEN hp_max IS NOT NULL AND $7::int IS NOT NULL
+             THEN LEAST(hp_max, GREATEST(0, hp_current + $7))
+           ELSE hp_current
+         END
+       WHERE id = $8`,
+      [label, image_url, color, x, y, visible_to_players, hp_delta, req.params.tokenId]
     );
 
     const fullBoard = await getFullBoard(campaign_id);

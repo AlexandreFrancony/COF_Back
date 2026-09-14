@@ -192,13 +192,13 @@ router.post('/scenarios/:id/tokens', requireGm, async (req, res) => {
       return res.status(404).json({ error: 'Scénario non trouvé' });
     }
 
-    const { label, character_id, image_url, color, x, y, visible_to_players } = req.body;
+    const { label, character_id, image_url, color, x, y, visible_to_players, hp_max } = req.body;
     if (!label) return res.status(400).json({ error: 'Nom du pion requis' });
 
     await pool.query(
-      `INSERT INTO scenario_tokens (scenario_id, character_id, label, image_url, color, x, y, visible_to_players)
-       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true))`,
-      [req.params.id, character_id || null, label, image_url || null, color, x, y, visible_to_players]
+      `INSERT INTO scenario_tokens (scenario_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max)
+       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true), $9, $9)`,
+      [req.params.id, character_id || null, label, image_url || null, color, x, y, visible_to_players, hp_max || null]
     );
 
     res.status(201).json((await enrichScenarios([await getScenarioRow(req.params.id)]))[0]);
@@ -216,7 +216,7 @@ router.post('/scenarios/:id/tokens', requireGm, async (req, res) => {
  */
 router.patch('/scenario-tokens/:id', requireGm, async (req, res) => {
   try {
-    const { label, image_url, color, x, y, visible_to_players } = req.body;
+    const { label, image_url, color, x, y, visible_to_players, hp_delta } = req.body;
     const result = await pool.query(
       `UPDATE scenario_tokens t SET
          label = COALESCE($1, t.label),
@@ -224,11 +224,16 @@ router.patch('/scenario-tokens/:id', requireGm, async (req, res) => {
          color = COALESCE($3, t.color),
          x = COALESCE($4, t.x),
          y = COALESCE($5, t.y),
-         visible_to_players = COALESCE($6, t.visible_to_players)
+         visible_to_players = COALESCE($6, t.visible_to_players),
+         hp_current = CASE
+           WHEN t.hp_max IS NOT NULL AND $7::int IS NOT NULL
+             THEN LEAST(t.hp_max, GREATEST(0, t.hp_current + $7))
+           ELSE t.hp_current
+         END
        FROM campaign_scenarios s JOIN campaigns c ON c.id = s.campaign_id
-       WHERE t.id = $7 AND t.scenario_id = s.id AND c.gm_id = $8
+       WHERE t.id = $8 AND t.scenario_id = s.id AND c.gm_id = $9
        RETURNING t.scenario_id`,
-      [label, image_url, color, x, y, visible_to_players, req.params.id, req.user.id]
+      [label, image_url, color, x, y, visible_to_players, hp_delta, req.params.id, req.user.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Pion non trouvé' });
     res.json((await enrichScenarios([await getScenarioRow(result.rows[0].scenario_id)]))[0]);
@@ -375,9 +380,9 @@ router.post('/scenarios/:id/launch', requireGm, async (req, res) => {
 
     for (const t of full.tokens) {
       await pool.query(
-        `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [board.id, t.character_id, t.label, t.image_url, t.color, t.x, t.y, t.visible_to_players]
+        `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [board.id, t.character_id, t.label, t.image_url, t.color, t.x, t.y, t.visible_to_players, t.hp_current, t.hp_max]
       );
     }
 
