@@ -276,6 +276,18 @@ CREATE TABLE IF NOT EXISTS board_states (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Initiative tracker: an ordered-by-initiative list of character-linked tokens is computed on
+-- the fly (never stored — it must always reflect whoever currently has a token on the board),
+-- only the current turn's position is persisted. initiative_current_token_id points at whichever
+-- token currently has the turn; NULL means "not started" (before the first Suivant click, or
+-- after Réinitialiser). initiative_round is purely informational (shown alongside the tracker),
+-- bumped each time the turn order wraps back to the top. initiative_visible is the GM's toggle
+-- for whether the projector (and the live board) actually renders the tracker at all — a lot of
+-- sessions have no active combat, so it defaults hidden rather than always-on clutter.
+ALTER TABLE board_states ADD COLUMN IF NOT EXISTS initiative_visible BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE board_states ADD COLUMN IF NOT EXISTS initiative_current_token_id INTEGER REFERENCES board_tokens(id) ON DELETE SET NULL;
+ALTER TABLE board_states ADD COLUMN IF NOT EXISTS initiative_round INTEGER NOT NULL DEFAULT 1;
+
 -- Reusable library of uploaded backgrounds (images and ambiance videos) a GM can pick from
 -- across campaigns/scenarios instead of re-uploading the same file every time.
 CREATE TABLE IF NOT EXISTS board_media (

@@ -121,7 +121,7 @@ router.get('/campaigns/:campaignId/board', async (req, res) => {
 /**
  * PATCH /campaigns/:campaignId/board — GM only.
  * Body: { background_url, background_type, grid_visible, grid_size,
- *         camera_x, camera_y, camera_width, camera_width_delta }
+ *         camera_x, camera_y, camera_width, camera_width_delta, initiative_visible }
  * background_type ('image' | 'video') tells the frontend how to render background_url —
  * a video plays fullscreen/looped/muted behind the grid/zones/tokens instead of being used
  * as a CSS background-image (p.ex. pour une ambiance sonore/visuelle hors combat).
@@ -141,7 +141,7 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
     const {
       background_url, background_type, grid_visible, grid_size,
       camera_x, camera_y, camera_width, camera_width_delta,
-      token_size_delta,
+      token_size_delta, initiative_visible,
     } = req.body;
     await pool.query(
       `UPDATE board_states SET
@@ -159,13 +159,14 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
          token_size = CASE
            WHEN $9::int IS NOT NULL THEN LEAST(80, GREATEST(20, token_size + $9))
            ELSE token_size
-         END
+         END,
+         initiative_visible = COALESCE($11, initiative_visible)
        WHERE campaign_id = $10`,
       [
         background_url, background_type, grid_visible, grid_size,
         camera_x, camera_y, camera_width, camera_width_delta,
         token_size_delta,
-        req.params.campaignId,
+        req.params.campaignId, initiative_visible,
       ]
     );
 
@@ -174,6 +175,75 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
     res.json(board);
   } catch (error) {
     console.error('Error PATCH board:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// The turn order is never stored — it's whoever currently has a character-linked token on the
+// board, sorted by their (already-computed) initiative, highest first. Recomputing it fresh
+// every time (rather than snapshotting an ordered list) means a token added/removed mid-combat
+// just slots into the order on the next "Suivant" instead of leaving stale/dangling entries.
+function initiativeOrder(board) {
+  return board.tokens
+    .filter((t) => t.character_id != null)
+    .sort((a, b) => (b.initiative ?? 0) - (a.initiative ?? 0) || a.id - b.id);
+}
+
+/**
+ * POST /campaigns/:campaignId/board/initiative/next — GM only. Advances to the next
+ * combatant in initiative order (wrapping around and bumping initiative_round). If nobody
+ * currently has the turn (fresh combat, or the previous holder's token got removed), starts
+ * at the top of the order instead of erroring.
+ */
+router.post('/campaigns/:campaignId/board/initiative/next', requireGm, async (req, res) => {
+  try {
+    const campaign = await findAccessibleCampaign(req.params.campaignId, req.user);
+    if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
+
+    const board = await getFullBoard(req.params.campaignId);
+    const order = initiativeOrder(board);
+    if (order.length === 0) return res.status(400).json({ error: 'Aucun personnage sur le plateau' });
+
+    const currentIndex = order.findIndex((t) => t.id === board.initiative_current_token_id);
+    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % order.length;
+    const wrapped = currentIndex !== -1 && nextIndex === 0;
+
+    await pool.query(
+      `UPDATE board_states SET
+         initiative_current_token_id = $1,
+         initiative_round = initiative_round + CASE WHEN $2 THEN 1 ELSE 0 END
+       WHERE campaign_id = $3`,
+      [order[nextIndex].id, wrapped, req.params.campaignId]
+    );
+
+    const updated = await getFullBoard(req.params.campaignId);
+    broadcastBoard(req.params.campaignId, updated, buildBoardForRole);
+    res.json(updated);
+  } catch (error) {
+    console.error('Error POST board initiative/next:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * POST /campaigns/:campaignId/board/initiative/reset — GM only. Clears the current turn and
+ * round counter back to the start of combat, without touching initiative_visible.
+ */
+router.post('/campaigns/:campaignId/board/initiative/reset', requireGm, async (req, res) => {
+  try {
+    const campaign = await findAccessibleCampaign(req.params.campaignId, req.user);
+    if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
+
+    await pool.query(
+      `UPDATE board_states SET initiative_current_token_id = NULL, initiative_round = 1 WHERE campaign_id = $1`,
+      [req.params.campaignId]
+    );
+
+    const updated = await getFullBoard(req.params.campaignId);
+    broadcastBoard(req.params.campaignId, updated, buildBoardForRole);
+    res.json(updated);
+  } catch (error) {
+    console.error('Error POST board initiative/reset:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
