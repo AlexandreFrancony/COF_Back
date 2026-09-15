@@ -46,7 +46,7 @@ export async function getFullBoard(campaignId) {
     pool.query(
       `SELECT bt.*, c.name AS character_name, c.is_npc,
               c.pv_current, c.pv_max, c.pm_current, c.pm_max,
-              c.points_chance, c.defense, c.initiative, c.caracteristiques,
+              c.points_chance, c.points_chance_current, c.defense, c.initiative, c.caracteristiques,
               c.avatar_url AS character_avatar_url, c.avatar_emoji AS character_avatar_emoji,
               owner.name AS owner_character_name,
               ogv.rang AS owner_golem_rang,
@@ -73,7 +73,7 @@ export async function getFullBoard(campaignId) {
   return { ...board, tokens: tokens.rows, zones: zones.rows };
 }
 
-const STAT_FIELDS = ['pv_current', 'pv_max', 'pm_current', 'pm_max', 'points_chance', 'defense', 'initiative', 'caracteristiques'];
+const STAT_FIELDS = ['pv_current', 'pv_max', 'pm_current', 'pm_max', 'points_chance', 'points_chance_current', 'defense', 'initiative', 'caracteristiques'];
 
 // A PNJ's live stats never reach a player, even when its pawn is shown on the map — only the
 // GM's own view (and the HUD it drives) gets to see enemy PV/PM/etc in real time.
