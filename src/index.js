@@ -17,6 +17,7 @@ import boardRouter from './routes/board.js';
 import boardMediaRouter from './routes/boardMedia.js';
 import armuresRouter from './routes/armures.js';
 import armesRouter from './routes/armes.js';
+import monstresRouter from './routes/monstres.js';
 import scenariosRouter from './routes/scenarios.js';
 import eventsRouter from './routes/events.js';
 import notesRouter from './routes/notes.js';
@@ -86,6 +87,7 @@ app.use('/rules', rulesRouter);
 app.use('/', boardMediaRouter); // mounts /board-media
 app.use('/', armuresRouter); // mounts /rules/armures
 app.use('/', armesRouter); // mounts /rules/armes
+app.use('/', monstresRouter); // mounts /rules/monstres and /rules/monstre-capacites
 app.use('/', scenariosRouter); // mounts /campaigns/:id/scenarios and /scenarios/:id
 app.use('/', eventsRouter); // mounts /campaigns/:id/events
 

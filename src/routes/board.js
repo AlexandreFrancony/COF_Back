@@ -50,7 +50,11 @@ export async function getFullBoard(campaignId) {
               c.avatar_url AS character_avatar_url, c.avatar_emoji AS character_avatar_emoji,
               owner.name AS owner_character_name,
               ogv.rang AS owner_golem_rang,
-              (owner.valeurs_attaque->>'magique')::int AS owner_attaque_magique
+              (owner.valeurs_attaque->>'magique')::int AS owner_attaque_magique,
+              m.name AS monstre_name, m.category AS monstre_category, m.nc AS monstre_nc,
+              m.caracteristiques AS monstre_caracteristiques, m.defense AS monstre_defense,
+              m.initiative AS monstre_initiative, m.attaques AS monstre_attaques,
+              m.capacites AS monstre_capacites
        FROM board_tokens bt
        LEFT JOIN characters c ON c.id = bt.character_id
        LEFT JOIN characters owner ON owner.id = bt.owner_character_id
@@ -60,6 +64,7 @@ export async function getFullBoard(campaignId) {
          WHERE cv.character_id = owner.id AND v.name = 'Voie du golem'
          LIMIT 1
        ) ogv ON true
+       LEFT JOIN rules_monstres m ON m.id = bt.monstre_id
        WHERE bt.board_state_id = $1 ORDER BY bt.id`,
       [board.id]
     ),
@@ -273,16 +278,22 @@ router.post('/campaigns/:campaignId/board/tokens', requireGm, async (req, res) =
     if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
 
     const board = await getOrCreateBoard(req.params.campaignId);
-    const { label, character_id, image_url, color, x, y, visible_to_players, hp_max, owner_character_id } = req.body;
+    const {
+      label, character_id, image_url, color, x, y, visible_to_players, hp_max,
+      owner_character_id, monstre_id,
+    } = req.body;
 
     if (!label) return res.status(400).json({ error: 'Nom du pion requis' });
 
     // A creature pawn (no character_id) can start with its own PV — hp_current always starts
-    // full at hp_max, there's no partial-health-on-creation use case.
+    // full at hp_max, there's no partial-health-on-creation use case. monstre_id's own stats
+    // (defense/attaques/caracteristiques) are joined live in getFullBoard, not copied here —
+    // only hp_max (the caller already read it off the bestiary entry to pass in) is snapshotted,
+    // same as a golem's.
     await pool.query(
-      `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id)
-       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true), $9, $9, $10)`,
-      [board.id, character_id || null, label, image_url || null, color, x, y, visible_to_players, hp_max || null, owner_character_id || null]
+      `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id, monstre_id)
+       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true), $9, $9, $10, $11)`,
+      [board.id, character_id || null, label, image_url || null, color, x, y, visible_to_players, hp_max || null, owner_character_id || null, monstre_id || null]
     );
 
     const fullBoard = await getFullBoard(req.params.campaignId);

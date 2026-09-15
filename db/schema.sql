@@ -153,6 +153,41 @@ CREATE TABLE IF NOT EXISTS rules_armes (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Bestiaire (Chapitre 3 "Opposition", p.258-303) — pure reference data, spawned onto the board
+-- as a creature pawn (board_tokens.monstre_id), never as a full character: a monster's stats
+-- don't come from a profil/voies/level combination the character recompute pipeline could ever
+-- produce (see the golem's own owner-derived-stats precedent for why creature pawns exist
+-- separately from characters at all). caracteristiques keeps the book's raw notation as strings
+-- (e.g. "+3*", the star meaning "dé bonus on tests of that caractéristique, never on attack",
+-- p.261) since these numbers are never fed into any formula, only ever displayed. attaques is
+-- one or more attack lines as printed (name, bonus, DM, notes) — never parsed apart, damage is
+-- rolled live at the table like rules_armes. capacites is this monster's own short summaries,
+-- self-contained for display (no join needed); rules_monstre_capacites below is the separate
+-- GM-facing glossary for the fuller text behind each named ability, since a monster ability
+-- (Embuscade, Enragé, Imparable...) is a different system from a voie's capacité and several
+-- monsters share the exact same one verbatim.
+CREATE TABLE IF NOT EXISTS rules_monstres (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    category VARCHAR(20) NOT NULL CHECK (category IN ('humanoide', 'animal', 'fantastique')),
+    nc VARCHAR(10) NOT NULL, -- e.g. '1/2', '4', '2 (3)', '8+' — kept as-is, not a plain integer
+    caracteristiques JSONB NOT NULL DEFAULT '{}',
+    defense INTEGER NOT NULL,
+    pv INTEGER NOT NULL,
+    initiative INTEGER NOT NULL,
+    attaques TEXT NOT NULL,
+    capacites JSONB NOT NULL DEFAULT '[]', -- [{name, resume}]
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS rules_monstre_capacites (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL,
+    resume VARCHAR(200),
+    description TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ============================================================================
 -- CHARACTERS
 -- ============================================================================
@@ -354,6 +389,12 @@ ALTER TABLE scenario_tokens ADD COLUMN IF NOT EXISTS hp_max INTEGER;
 -- (a golem's DEF/attack come from its forgesort, not from the pawn itself).
 ALTER TABLE board_tokens ADD COLUMN IF NOT EXISTS owner_character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL;
 ALTER TABLE scenario_tokens ADD COLUMN IF NOT EXISTS owner_character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL;
+
+-- Which bestiary entry a creature pawn was spawned from (rules_monstres) — its stats are
+-- joined live (not snapshotted) so a later fix to the bestiary data reaches every pawn already
+-- on a board. NULL for a golem or any other manually-specced creature pawn.
+ALTER TABLE board_tokens ADD COLUMN IF NOT EXISTS monstre_id INTEGER REFERENCES rules_monstres(id) ON DELETE SET NULL;
+ALTER TABLE scenario_tokens ADD COLUMN IF NOT EXISTS monstre_id INTEGER REFERENCES rules_monstres(id) ON DELETE SET NULL;
 
 -- Area-of-effect markers (explosion, cone, line...) drawn over the board, same visibility
 -- model as tokens. x/y is the anchor point (center for circle, origin for rectangle/cone);
