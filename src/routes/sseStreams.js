@@ -15,6 +15,8 @@ import { subscribe as subscribeBoard } from '../services/boardStream.js';
 import { resolveAccess as resolveNotesAccess } from './notes.js';
 import pool from '../db/pool.js';
 import { subscribe as subscribeNotes } from '../services/notesStream.js';
+import { getCharacterWithVoies, canAccessCharacter } from './characters.js';
+import { subscribe as subscribeCharacter } from '../services/characterStream.js';
 
 const router = Router();
 
@@ -87,6 +89,38 @@ router.get('/notes-stream/:campaignId', async (req, res) => {
     req.on('close', () => clearInterval(heartbeat));
   } catch (error) {
     console.error('Error SSE notes stream:', error.message);
+    res.status(500).end();
+  }
+});
+
+/**
+ * GET /character-stream/:characterId — SSE, token passed as ?token=. Only the owner or the
+ * campaign's GM can subscribe (same check as GET /characters/:id) — a character sheet has at
+ * most two possible viewers, never a whole campaign's worth like the board.
+ */
+router.get('/character-stream/:characterId', async (req, res) => {
+  try {
+    const user = req.query.token && verifyToken(req.query.token);
+    if (!user) return res.status(401).end();
+
+    const character = await getCharacterWithVoies(req.params.characterId);
+    if (!character) return res.status(404).end();
+    if (!(await canAccessCharacter(character, user))) return res.status(403).end();
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.write(':ok\n\n');
+    res.write(`event: character\ndata: ${JSON.stringify(character)}\n\n`);
+
+    subscribeCharacter(req.params.characterId, res);
+
+    const heartbeat = setInterval(() => res.write(':ping\n\n'), 25000);
+    req.on('close', () => clearInterval(heartbeat));
+  } catch (error) {
+    console.error('Error SSE character stream:', error.message);
     res.status(500).end();
   }
 });

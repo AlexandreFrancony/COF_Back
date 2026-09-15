@@ -11,6 +11,7 @@ import { logEvent } from '../services/eventLog.js';
 import { notifyCampaign } from '../services/discordWebhook.js';
 import { hasSubscribers, broadcastBoard } from '../services/boardStream.js';
 import { getFullBoard, buildBoardForRole } from './board.js';
+import { hasSubscribers as hasCharacterSubscribers, broadcastCharacter } from '../services/characterStream.js';
 
 const router = Router();
 router.use(authenticateToken);
@@ -35,7 +36,7 @@ const avatarUpload = multer({
   },
 });
 
-async function canAccessCharacter(character, user) {
+export async function canAccessCharacter(character, user) {
   if (character.user_id === user.id) return true;
   if (user.role !== 'gm') return false;
   const campaign = await pool.query('SELECT gm_id FROM campaigns WHERE id = $1', [character.campaign_id]);
@@ -67,7 +68,7 @@ router.post('/characters/:id/avatar', avatarUpload.single('image'), async (req, 
 // with the capacités owned up to their current rang. Used consistently everywhere (not just
 // GET) so a frontend handler can never accidentally drop the voies by using a mutation
 // endpoint's response directly instead of re-fetching.
-async function getCharacterWithVoies(characterId) {
+export async function getCharacterWithVoies(characterId) {
   const result = await pool.query('SELECT * FROM characters WHERE id = $1', [characterId]);
   const character = result.rows[0];
   if (!character) return null;
@@ -111,6 +112,15 @@ async function broadcastCharacterChange(campaignId) {
   broadcastBoard(key, board, buildBoardForRole);
 }
 
+// Same idea, aimed at the character sheet itself rather than the board — so a PV/PM/Chance
+// change made from the board (or by the GM editing the same character elsewhere) reaches
+// whoever has that character's own sheet open, instead of only ever updating on their own
+// actions. No-ops if nobody has that specific sheet open.
+async function broadcastCharacterSheet(characterId, updated) {
+  if (!hasCharacterSubscribers(characterId)) return;
+  broadcastCharacter(characterId, updated);
+}
+
 /**
  * Recomputes pv_max/pm_max/points_chance/dr_max/defense/initiative/valeurs_attaque for a
  * character and persists them, carrying forward the *gain* into pv_current/pm_current/
@@ -124,6 +134,7 @@ async function recomputeAndPersist(characterId) {
   const finish = async () => {
     const updated = await getCharacterWithVoies(characterId);
     if (character?.campaign_id) await broadcastCharacterChange(character.campaign_id);
+    await broadcastCharacterSheet(characterId, updated);
     return updated;
   };
 
