@@ -2,28 +2,20 @@
 // (updates only ever flow one editor -> server -> everyone else, no need for a websocket
 // dependency). Keyed by character_id rather than campaign_id: a character sheet is viewed by
 // at most its owner and the GM, never a whole campaign's worth of subscribers.
+import { createHub, writeSseEvent } from './sseHub.js';
 
-const subscribers = new Map(); // String(characterId) -> Set<res>
+const hub = createHub();
 
 export function subscribe(characterId, res) {
-  const key = String(characterId);
-  if (!subscribers.has(key)) subscribers.set(key, new Set());
-  subscribers.get(key).add(res);
-
-  res.on('close', () => {
-    subscribers.get(key)?.delete(res);
-  });
+  return hub.subscribe(characterId, { res });
 }
 
 export function hasSubscribers(characterId) {
-  return (subscribers.get(String(characterId))?.size ?? 0) > 0;
+  return hub.hasSubscribers(characterId);
 }
 
 export function broadcastCharacter(characterId, character) {
-  const entries = subscribers.get(String(characterId));
-  if (!entries) return;
-
-  for (const res of entries) {
-    res.write(`event: character\ndata: ${JSON.stringify(character)}\n\n`);
+  for (const { res } of hub.getSubscribers(characterId)) {
+    writeSseEvent(res, 'character', character);
   }
 }

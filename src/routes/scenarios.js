@@ -3,6 +3,7 @@ import pool from '../db/pool.js';
 import { authenticateToken, requireGm } from '../middleware/auth.js';
 import { getFullBoard, buildBoardForRole, getOrCreateBoard } from './board.js';
 import { broadcastBoard } from '../services/boardStream.js';
+import { TOKEN_ENRICHMENT_COLUMNS, TOKEN_ENRICHMENT_JOINS } from '../services/tokenEnrichment.js';
 
 const router = Router();
 // requireGm is applied per-route (not blanket) — this router is mounted at '/' alongside
@@ -51,24 +52,9 @@ async function getScenarioRow(scenarioId) {
 async function attachTokens(scenarioRows) {
   if (scenarioRows.length === 0) return [];
   const tokens = await pool.query(
-    `SELECT t.*, c.avatar_url AS character_avatar_url, c.avatar_emoji AS character_avatar_emoji,
-            owner.name AS owner_character_name,
-            ogv.rang AS owner_golem_rang,
-            (owner.valeurs_attaque->>'magique')::int AS owner_attaque_magique,
-            m.name AS monstre_name, m.category AS monstre_category, m.nc AS monstre_nc,
-            m.caracteristiques AS monstre_caracteristiques, m.defense AS monstre_defense,
-            m.initiative AS monstre_initiative, m.attaques AS monstre_attaques,
-            m.capacites AS monstre_capacites
+    `SELECT t.*, c.avatar_url AS character_avatar_url, c.avatar_emoji AS character_avatar_emoji,${TOKEN_ENRICHMENT_COLUMNS}
      FROM scenario_tokens t
-     LEFT JOIN characters c ON c.id = t.character_id
-     LEFT JOIN characters owner ON owner.id = t.owner_character_id
-     LEFT JOIN LATERAL (
-       SELECT cv.rang FROM character_voies cv
-       JOIN rules_voies v ON v.id = cv.voie_id
-       WHERE cv.character_id = owner.id AND v.name = 'Voie du golem'
-       LIMIT 1
-     ) ogv ON true
-     LEFT JOIN rules_monstres m ON m.id = t.monstre_id
+     LEFT JOIN characters c ON c.id = t.character_id${TOKEN_ENRICHMENT_JOINS}
      WHERE t.scenario_id = ANY($1) ORDER BY t.id`,
     [scenarioRows.map((s) => s.id)]
   );

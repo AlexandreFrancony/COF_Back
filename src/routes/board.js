@@ -6,6 +6,7 @@ import pool from '../db/pool.js';
 import { authenticateToken, requireGm } from '../middleware/auth.js';
 import { findAccessibleCampaign } from './campaigns.js';
 import { broadcastBoard } from '../services/boardStream.js';
+import { TOKEN_ENRICHMENT_COLUMNS, TOKEN_ENRICHMENT_JOINS } from '../services/tokenEnrichment.js';
 
 const router = Router();
 
@@ -44,28 +45,13 @@ export async function getFullBoard(campaignId) {
   const board = await getOrCreateBoard(campaignId);
   const [tokens, zones] = await Promise.all([
     pool.query(
-      `SELECT bt.*, c.name AS character_name, c.is_npc,
+      `SELECT t.*, c.name AS character_name, c.is_npc,
               c.pv_current, c.pv_max, c.pm_current, c.pm_max,
               c.points_chance, c.points_chance_current, c.defense, c.initiative, c.caracteristiques,
-              c.avatar_url AS character_avatar_url, c.avatar_emoji AS character_avatar_emoji,
-              owner.name AS owner_character_name,
-              ogv.rang AS owner_golem_rang,
-              (owner.valeurs_attaque->>'magique')::int AS owner_attaque_magique,
-              m.name AS monstre_name, m.category AS monstre_category, m.nc AS monstre_nc,
-              m.caracteristiques AS monstre_caracteristiques, m.defense AS monstre_defense,
-              m.initiative AS monstre_initiative, m.attaques AS monstre_attaques,
-              m.capacites AS monstre_capacites
-       FROM board_tokens bt
-       LEFT JOIN characters c ON c.id = bt.character_id
-       LEFT JOIN characters owner ON owner.id = bt.owner_character_id
-       LEFT JOIN LATERAL (
-         SELECT cv.rang FROM character_voies cv
-         JOIN rules_voies v ON v.id = cv.voie_id
-         WHERE cv.character_id = owner.id AND v.name = 'Voie du golem'
-         LIMIT 1
-       ) ogv ON true
-       LEFT JOIN rules_monstres m ON m.id = bt.monstre_id
-       WHERE bt.board_state_id = $1 ORDER BY bt.id`,
+              c.avatar_url AS character_avatar_url, c.avatar_emoji AS character_avatar_emoji,${TOKEN_ENRICHMENT_COLUMNS}
+       FROM board_tokens t
+       LEFT JOIN characters c ON c.id = t.character_id${TOKEN_ENRICHMENT_JOINS}
+       WHERE t.board_state_id = $1 ORDER BY t.id`,
       [board.id]
     ),
     pool.query('SELECT * FROM board_zones WHERE board_state_id = $1 ORDER BY id', [board.id]),

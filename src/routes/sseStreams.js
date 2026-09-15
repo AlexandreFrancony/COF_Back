@@ -10,6 +10,7 @@
 // whole class of bug instead of re-solving it per SSE endpoint.
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
+import { writeSseEvent } from '../services/sseHub.js';
 import { getFullBoard, buildBoardForRole, resolveRole } from './board.js';
 import { subscribe as subscribeBoard } from '../services/boardStream.js';
 import { resolveAccess as resolveNotesAccess } from './notes.js';
@@ -28,6 +29,22 @@ function verifyToken(token) {
   }
 }
 
+// Shared boilerplate across every SSE route below: open the stream, send a comment so the
+// client knows the connection is live, and keep it alive with a periodic ping (proxies/browsers
+// tend to silently drop an idle HTTP connection well before either side means to close it).
+// What differs per route — the access check and the initial payload — stays in the route itself.
+function startSseResponse(req, res) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write(':ok\n\n');
+
+  const heartbeat = setInterval(() => res.write(':ping\n\n'), 25000);
+  req.on('close', () => clearInterval(heartbeat));
+}
+
 /**
  * GET /board-stream/:campaignId — SSE, token passed as ?token=
  */
@@ -39,20 +56,11 @@ router.get('/board-stream/:campaignId', async (req, res) => {
     const role = await resolveRole(req.params.campaignId, user);
     if (!role) return res.status(404).end();
 
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    });
-    res.write(':ok\n\n');
-
+    startSseResponse(req, res);
     const board = await getFullBoard(req.params.campaignId);
-    res.write(`event: board\ndata: ${JSON.stringify(buildBoardForRole(board, role))}\n\n`);
+    writeSseEvent(res, 'board', buildBoardForRole(board, role));
 
     subscribeBoard(req.params.campaignId, role, res);
-
-    const heartbeat = setInterval(() => res.write(':ping\n\n'), 25000);
-    req.on('close', () => clearInterval(heartbeat));
   } catch (error) {
     console.error('Error SSE board stream:', error.message);
     res.status(500).end();
@@ -69,24 +77,15 @@ router.get('/notes-stream/:campaignId', async (req, res) => {
 
     if (!(await resolveNotesAccess(req.params.campaignId, user))) return res.status(404).end();
 
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    });
-    res.write(':ok\n\n');
-
+    startSseResponse(req, res);
     const result = await pool.query(
       'SELECT content, updated_at, updated_by FROM campaign_notes WHERE campaign_id = $1',
       [req.params.campaignId]
     );
     const notes = result.rows[0] || { content: '', updated_at: null, updated_by: null };
-    res.write(`event: notes\ndata: ${JSON.stringify(notes)}\n\n`);
+    writeSseEvent(res, 'notes', notes);
 
     subscribeNotes(req.params.campaignId, res);
-
-    const heartbeat = setInterval(() => res.write(':ping\n\n'), 25000);
-    req.on('close', () => clearInterval(heartbeat));
   } catch (error) {
     console.error('Error SSE notes stream:', error.message);
     res.status(500).end();
@@ -107,18 +106,10 @@ router.get('/character-stream/:characterId', async (req, res) => {
     if (!character) return res.status(404).end();
     if (!(await canAccessCharacter(character, user))) return res.status(403).end();
 
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    });
-    res.write(':ok\n\n');
-    res.write(`event: character\ndata: ${JSON.stringify(character)}\n\n`);
+    startSseResponse(req, res);
+    writeSseEvent(res, 'character', character);
 
     subscribeCharacter(req.params.characterId, res);
-
-    const heartbeat = setInterval(() => res.write(':ping\n\n'), 25000);
-    req.on('close', () => clearInterval(heartbeat));
   } catch (error) {
     console.error('Error SSE character stream:', error.message);
     res.status(500).end();
