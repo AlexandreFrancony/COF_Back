@@ -34,7 +34,7 @@ export async function getFullBoard(campaignId) {
     pool.query(
       `SELECT t.*, c.name AS character_name, c.is_npc,
               c.pv_current, c.pv_max, c.pm_current, c.pm_max,
-              c.points_chance, c.points_chance_current, c.defense, c.initiative, c.caracteristiques,
+              c.points_chance, c.points_chance_current, c.defense, c.initiative, c.destin, c.caracteristiques,
               c.avatar_url AS character_avatar_url, c.avatar_emoji AS character_avatar_emoji,${TOKEN_ENRICHMENT_COLUMNS}
        FROM board_tokens t
        LEFT JOIN characters c ON c.id = t.character_id${TOKEN_ENRICHMENT_JOINS}
@@ -46,7 +46,7 @@ export async function getFullBoard(campaignId) {
   return { ...board, tokens: tokens.rows, zones: zones.rows };
 }
 
-const STAT_FIELDS = ['pv_current', 'pv_max', 'pm_current', 'pm_max', 'points_chance', 'points_chance_current', 'defense', 'initiative', 'caracteristiques'];
+const STAT_FIELDS = ['pv_current', 'pv_max', 'pm_current', 'pm_max', 'points_chance', 'points_chance_current', 'defense', 'initiative', 'destin', 'caracteristiques'];
 
 // A creature pawn's own PV (Token's on-canvas life bar) and, for a bestiary monster, its whole
 // joined stat block (CreatureSummaryCard's Déf/Init/attaques/capacités) — hidden together so a
@@ -206,7 +206,9 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
 function initiativeOrder(board) {
   return board.tokens
     .filter((t) => t.character_id != null)
-    .sort((a, b) => (b.initiative ?? 0) - (a.initiative ?? 0) || a.id - b.id);
+    // Ties on initiative break on the GM's own session "destin" d6 (higher wins), then finally
+    // on token id so the order is at least stable when neither is set.
+    .sort((a, b) => (b.initiative ?? 0) - (a.initiative ?? 0) || (b.destin ?? 0) - (a.destin ?? 0) || a.id - b.id);
 }
 
 /**

@@ -421,7 +421,7 @@ router.patch('/characters/:id', async (req, res) => {
     const avatarEmojiProvided = 'avatar_emoji' in req.body;
     const {
       capacity_points_available, forgets_available, pv_body_total,
-      pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan,
+      pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan, destin,
     } = isGm ? req.body : {};
 
     // Character-creation finalize: profil_id goes from unset to set. Seed the PV ledger here
@@ -459,8 +459,9 @@ router.patch('/characters/:id', async (req, res) => {
          pieces_cuivre = COALESCE($32, pieces_cuivre),
          pieces_argent = COALESCE($33, pieces_argent),
          pieces_or = COALESCE($34, pieces_or),
-         pieces_platine = COALESCE($35, pieces_platine)
-       WHERE id = $36`,
+         pieces_platine = COALESCE($35, pieces_platine),
+         destin = COALESCE($36, destin)
+       WHERE id = $37`,
       [
         name, profil_id, peuple_id, level,
         caracteristiques ? JSON.stringify(caracteristiques) : null,
@@ -476,6 +477,7 @@ router.patch('/characters/:id', async (req, res) => {
         avatarUrlProvided, avatar_url ?? null,
         avatarEmojiProvided, avatar_emoji ?? null,
         pieces_cuivre, pieces_argent, pieces_or, pieces_platine,
+        destin,
         req.params.id,
       ]
     );
@@ -506,6 +508,10 @@ router.patch('/characters/:id', async (req, res) => {
         const delta = pm_current - character.pm_current;
         await logEvent(character.campaign_id, character.id, 'pm_change',
           `${character.name} : PM ${character.pm_current} → ${pm_current} (${delta > 0 ? '+' : ''}${delta})`);
+      }
+      if (destin !== undefined && destin !== character.destin) {
+        await logEvent(character.campaign_id, character.id, 'destin_set',
+          `${character.name} : Destin = ${destin}`);
       }
     }
 

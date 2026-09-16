@@ -226,6 +226,11 @@ CREATE TABLE IF NOT EXISTS characters (
     dr_die VARCHAR(10), -- die size (e.g. 'd10'), fixed per the principal profil's famille
     defense INTEGER NOT NULL DEFAULT 0,
     initiative INTEGER NOT NULL DEFAULT 0,
+    -- The GM's own "destin" d6, rolled once at the start of each session (not a COF2 rulebook
+    -- mechanic — house rule): breaks initiative ties and doubles as a general "luck of the day"
+    -- reference. NULL until the GM sets it; never recomputed by recomputeAndPersist like
+    -- initiative/defense are, since nothing derives it — it's a plain manual value.
+    destin INTEGER,
     capacity_points_available INTEGER NOT NULL DEFAULT 0,
     valeurs_attaque JSONB NOT NULL DEFAULT '{}',
     equipement JSONB NOT NULL DEFAULT '[]',
