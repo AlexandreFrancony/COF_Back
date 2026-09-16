@@ -199,16 +199,30 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
   }
 });
 
-// The turn order is never stored — it's whoever currently has a character-linked token on the
-// board, sorted by their (already-computed) initiative, highest first. Recomputing it fresh
-// every time (rather than snapshotting an ordered list) means a token added/removed mid-combat
-// just slots into the order on the next "Suivant" instead of leaving stale/dangling entries.
+// A character-linked token uses its character's initiative; a bestiary monster pawn has no
+// character_id but carries its own monstre_initiative (joined live off rules_monstres) — a
+// golem/plain pawn has neither and never gets a turn of its own (a golem acts on its creator's
+// turn, per the rulebook capacité).
+function tokenInitiative(t) {
+  return t.character_id != null ? t.initiative : t.monstre_initiative;
+}
+
+// The turn order is never stored — it's whoever currently has a character-linked or bestiary
+// monster token on the board, sorted by their (already-computed) initiative, highest first.
+// Recomputing it fresh every time (rather than snapshotting an ordered list) means a token
+// added/removed mid-combat just slots into the order on the next "Suivant" instead of leaving
+// stale/dangling entries. This runs on the GM-only /initiative/next route against the unstripped
+// board, so a hidden (not yet visible_to_players) monster still gets its turn advanced normally —
+// a surprise round doesn't wait for the reveal. What a player actually sees of this same order is
+// governed entirely by buildBoardForRole already filtering board.tokens down to visible ones
+// before it ever reaches them, not by anything here.
 function initiativeOrder(board) {
   return board.tokens
-    .filter((t) => t.character_id != null)
-    // Ties on initiative break on the player's own session "destin" d20 (higher wins), then
-    // finally on token id so the order is at least stable when neither is set.
-    .sort((a, b) => (b.initiative ?? 0) - (a.initiative ?? 0) || (b.destin ?? 0) - (a.destin ?? 0) || a.id - b.id);
+    .filter((t) => t.character_id != null || t.monstre_id != null)
+    // Ties on initiative break on the player's own session "destin" d20 (higher wins, monsters
+    // don't roll one so this is a no-op for them), then finally on token id so the order is at
+    // least stable when neither is set.
+    .sort((a, b) => (tokenInitiative(b) ?? 0) - (tokenInitiative(a) ?? 0) || (b.destin ?? 0) - (a.destin ?? 0) || a.id - b.id);
 }
 
 /**
@@ -438,12 +452,15 @@ router.post('/campaigns/:campaignId/board/tokens', requireGm, async (req, res) =
     // same as a golem's. hide_hp_from_players defaults to true for a bestiary spawn (the whole
     // point of the bibliothèque d'ennemis is a pawn the players shouldn't see the real PV of)
     // and false otherwise (a golem is player-owned, a plain named pawn is whatever the GM wants
-    // it to be) — the caller can still override either way.
+    // it to be) — the caller can still override either way. visible_to_players mirrors the same
+    // reasoning: a bestiary spawn starts hidden (an ambush isn't a surprise if the pawn appears
+    // the instant the GM adds it), everything else starts shown as before.
     const hideHp = hide_hp_from_players ?? (monstre_id != null);
+    const visibleToPlayers = visible_to_players ?? (monstre_id == null);
     await pool.query(
       `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id, monstre_id, hide_hp_from_players)
-       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true), $9, $9, $10, $11, $12)`,
-      [board.id, character_id || null, label, image_url || null, color, x, y, visible_to_players, hp_max || null, owner_character_id || null, monstre_id || null, hideHp]
+       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), $8, $9, $9, $10, $11, $12)`,
+      [board.id, character_id || null, label, image_url || null, color, x, y, visibleToPlayers, hp_max || null, owner_character_id || null, monstre_id || null, hideHp]
     );
 
     const fullBoard = await getFullBoard(req.params.campaignId);

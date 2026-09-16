@@ -200,13 +200,15 @@ router.post('/scenarios/:id/tokens', requireGm, async (req, res) => {
     } = req.body;
     if (!label) return res.status(400).json({ error: 'Nom du pion requis' });
 
-    // Same default as board.js's own POST /board/tokens: a bestiary spawn hides its PV from
-    // players by default, carried through to the live board once the scenario is launched.
+    // Same defaults as board.js's own POST /board/tokens, carried through to the live board once
+    // the scenario is launched: a bestiary spawn hides its PV and starts invisible to players
+    // (an ambush isn't a surprise if the pawn shows up the instant it's placed).
     const hideHp = hide_hp_from_players ?? (monstre_id != null);
+    const visibleToPlayers = visible_to_players ?? (monstre_id == null);
     await pool.query(
       `INSERT INTO scenario_tokens (scenario_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id, monstre_id, hide_hp_from_players)
-       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true), $9, $9, $10, $11, $12)`,
-      [req.params.id, character_id || null, label, image_url || null, color, x, y, visible_to_players, hp_max || null, owner_character_id || null, monstre_id || null, hideHp]
+       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), $8, $9, $9, $10, $11, $12)`,
+      [req.params.id, character_id || null, label, image_url || null, color, x, y, visibleToPlayers, hp_max || null, owner_character_id || null, monstre_id || null, hideHp]
     );
 
     res.status(201).json((await enrichScenarios([await getScenarioRow(req.params.id)]))[0]);
