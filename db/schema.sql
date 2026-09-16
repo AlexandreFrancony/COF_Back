@@ -335,17 +335,21 @@ ALTER TABLE board_states ADD COLUMN IF NOT EXISTS initiative_round INTEGER NOT N
 -- across campaigns/scenarios instead of re-uploading the same file every time.
 CREATE TABLE IF NOT EXISTS board_media (
     id SERIAL PRIMARY KEY,
-    type VARCHAR(10) NOT NULL CHECK (type IN ('image', 'video', 'audio')),
+    type VARCHAR(10) NOT NULL CHECK (type IN ('image', 'video', 'audio', 'handout')),
     url TEXT NOT NULL,
     label VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 'audio' added after the table already existed on an install predating it — the inline CHECK
--- above only takes effect on a fresh CREATE TABLE, so an existing database needs its constraint
--- replaced explicitly. Safe to re-run: DROP...IF EXISTS makes this a no-op once already applied.
+-- 'audio'/'handout' added after the table already existed on an install predating them — the
+-- inline CHECK above only takes effect on a fresh CREATE TABLE, so an existing database needs
+-- its constraint replaced explicitly. Safe to re-run: DROP...IF EXISTS makes this a no-op once
+-- already applied. 'handout' is a plain image kept in a separate bucket from 'image' backgrounds
+-- so the two pickers (fond du plateau vs. document à montrer) never mix each other's entries —
+-- a letter prop showing up while browsing battle maps (or vice versa) was exactly the clutter
+-- this split avoids.
 ALTER TABLE board_media DROP CONSTRAINT IF EXISTS board_media_type_check;
-ALTER TABLE board_media ADD CONSTRAINT board_media_type_check CHECK (type IN ('image', 'video', 'audio'));
+ALTER TABLE board_media ADD CONSTRAINT board_media_type_check CHECK (type IN ('image', 'video', 'audio', 'handout'));
 
 -- An ambiance track plays independently of the visual background (image or looping video) —
 -- both can be active at once, e.g. a dungeon image with a soundtrack underneath. Decoupled from

@@ -23,16 +23,22 @@ router.get('/board-media', requireGm, async (req, res) => {
 });
 
 /**
- * POST /board-media — GM only, multipart field "file". Uploads an image, mp4 video, or audio
- * track into the library and returns the created record; the caller still has to PATCH a
- * board's background_url/background_type (image/video) or music_url (audio) to actually use it.
+ * POST /board-media — GM only, multipart field "file", optional field "kind". Uploads an image,
+ * mp4 video, or audio track into the library and returns the created record; the caller still
+ * has to PATCH a board's background_url/background_type (image/video), music_url (audio), or
+ * handout_url (handout) to actually use it.
+ * kind: 'handout' tags a plain image as a document to show players, kept in its own bucket
+ * separate from 'image' backgrounds — the mimetype alone can't say which one an image is for,
+ * so the uploader (which panel the GM used) has to say. Ignored for video/audio, which are only
+ * ever backgrounds/ambiance.
  */
 router.post('/board-media', requireGm, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Aucun fichier fourni' });
 
     const type = req.file.mimetype.startsWith('video/') ? 'video'
-      : req.file.mimetype.startsWith('audio/') ? 'audio' : 'image';
+      : req.file.mimetype.startsWith('audio/') ? 'audio'
+      : req.body.kind === 'handout' ? 'handout' : 'image';
     const url = `/uploads/${req.file.filename}`;
     const label = req.body.label || req.file.originalname;
 
