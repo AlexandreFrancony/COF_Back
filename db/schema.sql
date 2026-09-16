@@ -396,6 +396,16 @@ ALTER TABLE scenario_tokens ADD COLUMN IF NOT EXISTS owner_character_id INTEGER 
 ALTER TABLE board_tokens ADD COLUMN IF NOT EXISTS monstre_id INTEGER REFERENCES rules_monstres(id) ON DELETE SET NULL;
 ALTER TABLE scenario_tokens ADD COLUMN IF NOT EXISTS monstre_id INTEGER REFERENCES rules_monstres(id) ON DELETE SET NULL;
 
+-- A creature pawn's own PV (and, for a bestiary monster, its whole joined stat block) can be
+-- kept off the players' view even while the pawn itself is shown on the map — the GM still
+-- sees the real numbers, players never do. player_hp_label is the GM's own opt-in replacement
+-- shown to players instead of the hidden bar (a wound count, an emoji, "??"...) — NULL means
+-- nothing is shown in its place, not even a placeholder.
+ALTER TABLE board_tokens ADD COLUMN IF NOT EXISTS hide_hp_from_players BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE board_tokens ADD COLUMN IF NOT EXISTS player_hp_label VARCHAR(20);
+ALTER TABLE scenario_tokens ADD COLUMN IF NOT EXISTS hide_hp_from_players BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE scenario_tokens ADD COLUMN IF NOT EXISTS player_hp_label VARCHAR(20);
+
 -- Area-of-effect markers (explosion, cone, line...) drawn over the board, same visibility
 -- model as tokens. x/y is the anchor point (center for circle, origin for rectangle/cone);
 -- size/width are percentages of the board width; rotation in degrees orients rectangle/cone.

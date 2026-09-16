@@ -61,12 +61,31 @@ export async function getFullBoard(campaignId) {
 
 const STAT_FIELDS = ['pv_current', 'pv_max', 'pm_current', 'pm_max', 'points_chance', 'points_chance_current', 'defense', 'initiative', 'caracteristiques'];
 
+// A creature pawn's own PV (Token's on-canvas life bar) and, for a bestiary monster, its whole
+// joined stat block (CreatureSummaryCard's Déf/Init/attaques/capacités) — hidden together so a
+// player can never back into the monster's identity/stats just because its exact PV is masked.
+// player_hp_label is deliberately NOT in this list: it's the GM's own opt-in replacement clue,
+// meant exactly for players to see in place of the real numbers.
+const HIDDEN_CREATURE_FIELDS = [
+  'hp_current', 'hp_max',
+  'monstre_name', 'monstre_category', 'monstre_nc', 'monstre_defense',
+  'monstre_initiative', 'monstre_attaques', 'monstre_caracteristiques', 'monstre_capacites',
+];
+
 // A PNJ's live stats never reach a player, even when its pawn is shown on the map — only the
-// GM's own view (and the HUD it drives) gets to see enemy PV/PM/etc in real time.
+// GM's own view (and the HUD it drives) gets to see enemy PV/PM/etc in real time. Same idea for
+// a creature pawn the GM marked hide_hp_from_players (typically an enemy spawned from the
+// bibliothèque d'ennemis) — its own life bar/stat block never reaches a player either.
 function stripEnemyStats(token) {
-  if (!token.is_npc) return token;
-  const stripped = { ...token };
-  for (const field of STAT_FIELDS) stripped[field] = null;
+  let stripped = token;
+  if (token.is_npc) {
+    stripped = { ...stripped };
+    for (const field of STAT_FIELDS) stripped[field] = null;
+  }
+  if (token.hide_hp_from_players) {
+    stripped = { ...stripped };
+    for (const field of HIDDEN_CREATURE_FIELDS) stripped[field] = null;
+  }
   return stripped;
 }
 
@@ -266,7 +285,7 @@ router.post('/campaigns/:campaignId/board/tokens', requireGm, async (req, res) =
     const board = await getOrCreateBoard(req.params.campaignId);
     const {
       label, character_id, image_url, color, x, y, visible_to_players, hp_max,
-      owner_character_id, monstre_id,
+      owner_character_id, monstre_id, hide_hp_from_players,
     } = req.body;
 
     if (!label) return res.status(400).json({ error: 'Nom du pion requis' });
@@ -275,11 +294,15 @@ router.post('/campaigns/:campaignId/board/tokens', requireGm, async (req, res) =
     // full at hp_max, there's no partial-health-on-creation use case. monstre_id's own stats
     // (defense/attaques/caracteristiques) are joined live in getFullBoard, not copied here —
     // only hp_max (the caller already read it off the bestiary entry to pass in) is snapshotted,
-    // same as a golem's.
+    // same as a golem's. hide_hp_from_players defaults to true for a bestiary spawn (the whole
+    // point of the bibliothèque d'ennemis is a pawn the players shouldn't see the real PV of)
+    // and false otherwise (a golem is player-owned, a plain named pawn is whatever the GM wants
+    // it to be) — the caller can still override either way.
+    const hideHp = hide_hp_from_players ?? (monstre_id != null);
     await pool.query(
-      `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id, monstre_id)
-       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true), $9, $9, $10, $11)`,
-      [board.id, character_id || null, label, image_url || null, color, x, y, visible_to_players, hp_max || null, owner_character_id || null, monstre_id || null]
+      `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id, monstre_id, hide_hp_from_players)
+       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true), $9, $9, $10, $11, $12)`,
+      [board.id, character_id || null, label, image_url || null, color, x, y, visible_to_players, hp_max || null, owner_character_id || null, monstre_id || null, hideHp]
     );
 
     const fullBoard = await getFullBoard(req.params.campaignId);
@@ -308,7 +331,10 @@ router.patch('/board/tokens/:tokenId', requireGm, async (req, res) => {
     const campaign = await findAccessibleCampaign(campaign_id, req.user);
     if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
 
-    const { label, image_url, color, x, y, visible_to_players, hp_delta } = req.body;
+    const {
+      label, image_url, color, x, y, visible_to_players, hp_delta,
+      hide_hp_from_players, player_hp_label,
+    } = req.body;
     // hp_delta (not an absolute value) applies atomically in SQL, same reasoning as board_zones'
     // size_delta — a GM clicking a creature's PV +/- rapidly would otherwise drop in-flight
     // clicks fired before the previous response's state lands. Clamped to [0, hp_max]; a no-op
@@ -325,9 +351,11 @@ router.patch('/board/tokens/:tokenId', requireGm, async (req, res) => {
            WHEN hp_max IS NOT NULL AND $7::int IS NOT NULL
              THEN LEAST(hp_max, GREATEST(0, hp_current + $7))
            ELSE hp_current
-         END
+         END,
+         hide_hp_from_players = COALESCE($9, hide_hp_from_players),
+         player_hp_label = COALESCE($10, player_hp_label)
        WHERE id = $8`,
-      [label, image_url, color, x, y, visible_to_players, hp_delta, req.params.tokenId]
+      [label, image_url, color, x, y, visible_to_players, hp_delta, req.params.tokenId, hide_hp_from_players, player_hp_label]
     );
 
     const fullBoard = await getFullBoard(campaign_id);

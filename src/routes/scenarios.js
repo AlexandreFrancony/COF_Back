@@ -196,14 +196,17 @@ router.post('/scenarios/:id/tokens', requireGm, async (req, res) => {
 
     const {
       label, character_id, image_url, color, x, y, visible_to_players, hp_max,
-      owner_character_id, monstre_id,
+      owner_character_id, monstre_id, hide_hp_from_players,
     } = req.body;
     if (!label) return res.status(400).json({ error: 'Nom du pion requis' });
 
+    // Same default as board.js's own POST /board/tokens: a bestiary spawn hides its PV from
+    // players by default, carried through to the live board once the scenario is launched.
+    const hideHp = hide_hp_from_players ?? (monstre_id != null);
     await pool.query(
-      `INSERT INTO scenario_tokens (scenario_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id, monstre_id)
-       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true), $9, $9, $10, $11)`,
-      [req.params.id, character_id || null, label, image_url || null, color, x, y, visible_to_players, hp_max || null, owner_character_id || null, monstre_id || null]
+      `INSERT INTO scenario_tokens (scenario_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id, monstre_id, hide_hp_from_players)
+       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), COALESCE($8, true), $9, $9, $10, $11, $12)`,
+      [req.params.id, character_id || null, label, image_url || null, color, x, y, visible_to_players, hp_max || null, owner_character_id || null, monstre_id || null, hideHp]
     );
 
     res.status(201).json((await enrichScenarios([await getScenarioRow(req.params.id)]))[0]);
@@ -221,7 +224,10 @@ router.post('/scenarios/:id/tokens', requireGm, async (req, res) => {
  */
 router.patch('/scenario-tokens/:id', requireGm, async (req, res) => {
   try {
-    const { label, image_url, color, x, y, visible_to_players, hp_delta } = req.body;
+    const {
+      label, image_url, color, x, y, visible_to_players, hp_delta,
+      hide_hp_from_players, player_hp_label,
+    } = req.body;
     const result = await pool.query(
       `UPDATE scenario_tokens t SET
          label = COALESCE($1, t.label),
@@ -234,11 +240,13 @@ router.patch('/scenario-tokens/:id', requireGm, async (req, res) => {
            WHEN t.hp_max IS NOT NULL AND $7::int IS NOT NULL
              THEN LEAST(t.hp_max, GREATEST(0, t.hp_current + $7))
            ELSE t.hp_current
-         END
+         END,
+         hide_hp_from_players = COALESCE($10, t.hide_hp_from_players),
+         player_hp_label = COALESCE($11, t.player_hp_label)
        FROM campaign_scenarios s JOIN campaigns c ON c.id = s.campaign_id
        WHERE t.id = $8 AND t.scenario_id = s.id AND c.gm_id = $9
        RETURNING t.scenario_id`,
-      [label, image_url, color, x, y, visible_to_players, hp_delta, req.params.id, req.user.id]
+      [label, image_url, color, x, y, visible_to_players, hp_delta, req.params.id, req.user.id, hide_hp_from_players, player_hp_label]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Pion non trouvé' });
     res.json((await enrichScenarios([await getScenarioRow(result.rows[0].scenario_id)]))[0]);
@@ -385,9 +393,9 @@ router.post('/scenarios/:id/launch', requireGm, async (req, res) => {
 
     for (const t of full.tokens) {
       await pool.query(
-        `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id, monstre_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-        [board.id, t.character_id, t.label, t.image_url, t.color, t.x, t.y, t.visible_to_players, t.hp_current, t.hp_max, t.owner_character_id, t.monstre_id]
+        `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id, monstre_id, hide_hp_from_players, player_hp_label)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+        [board.id, t.character_id, t.label, t.image_url, t.color, t.x, t.y, t.visible_to_players, t.hp_current, t.hp_max, t.owner_character_id, t.monstre_id, t.hide_hp_from_players, t.player_hp_label]
       );
     }
 
