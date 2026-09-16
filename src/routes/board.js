@@ -206,8 +206,8 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
 function initiativeOrder(board) {
   return board.tokens
     .filter((t) => t.character_id != null)
-    // Ties on initiative break on the GM's own session "destin" d6 (higher wins), then finally
-    // on token id so the order is at least stable when neither is set.
+    // Ties on initiative break on the player's own session "destin" d20 (higher wins), then
+    // finally on token id so the order is at least stable when neither is set.
     .sort((a, b) => (b.initiative ?? 0) - (a.initiative ?? 0) || (b.destin ?? 0) - (a.destin ?? 0) || a.id - b.id);
 }
 

@@ -409,6 +409,10 @@ router.patch('/characters/:id', async (req, res) => {
       arme_principale_id, arme_secondaire_id, custom_data,
       avatar_url, avatar_emoji,
       pieces_cuivre, pieces_argent, pieces_or, pieces_platine,
+      // Unlike the GM-only bucket below, destin is set by whoever rolled the physical die —
+      // the owning player on their own sheet, or the GM straight from the board pawn.
+      // canAccessCharacter (above) already gates this to just those two.
+      destin,
     } = req.body;
     const armureIdProvided = 'armure_id' in req.body;
     const bouclierIdProvided = 'bouclier_id' in req.body;
@@ -421,7 +425,7 @@ router.patch('/characters/:id', async (req, res) => {
     const avatarEmojiProvided = 'avatar_emoji' in req.body;
     const {
       capacity_points_available, forgets_available, pv_body_total,
-      pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan, destin,
+      pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan,
     } = isGm ? req.body : {};
 
     // Character-creation finalize: profil_id goes from unset to set. Seed the PV ledger here
