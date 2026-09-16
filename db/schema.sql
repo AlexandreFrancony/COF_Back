@@ -357,6 +357,30 @@ ALTER TABLE board_states ADD COLUMN IF NOT EXISTS music_url TEXT;
 ALTER TABLE board_states ADD COLUMN IF NOT EXISTS music_playing BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE board_states ADD COLUMN IF NOT EXISTS music_volume REAL NOT NULL DEFAULT 0.5;
 
+-- Fog of war (a simple reveal-the-map, not Foundry's dynamic lighting/line-of-sight): a fixed
+-- FOG_COLS x FOG_ROWS grid of cells (see BoardCanvas.jsx) the GM paints reveal/hide over.
+-- fog_revealed is the array of revealed cell indices (row * FOG_COLS + col) — the same array
+-- reaches every viewer unfiltered, since it only says which cells are covered, never anything
+-- about what's under them (the actual hiding happens client-side, rendering a black square over
+-- an uncovered cell — fully opaque for players/projector, semi-transparent for the GM's own view
+-- since they still need to see what they're painting over).
+ALTER TABLE board_states ADD COLUMN IF NOT EXISTS fog_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE board_states ADD COLUMN IF NOT EXISTS fog_revealed JSONB NOT NULL DEFAULT '[]';
+
+-- A single image shown full-screen over the board on the player/projector views only — never the
+-- GM's own working canvas, which keeps showing the live map underneath while it's up. A letter,
+-- an NPC portrait, a map excerpt. Decoupled from board_media.id once picked, same reasoning as
+-- background_url (deleting the library entry later doesn't cut a handout already on screen).
+ALTER TABLE board_states ADD COLUMN IF NOT EXISTS handout_url TEXT;
+
+-- Freehand annotations any campaign member (GM or player) can add — a quick "the trap is here"
+-- arrow, an improvised path everyone's looking at together. [{points: [{x,y}, ...], color}, ...],
+-- coordinates in the same 0-100 scene space as everything else. Appended to atomically (the
+-- POST route uses jsonb's || concatenation) rather than replaced wholesale, since a player and
+-- the GM could draw at the same moment and a client-computed full-array PATCH would let one
+-- overwrite the other's addition. Erasing (undo-last / clear-all) stays GM-only.
+ALTER TABLE board_states ADD COLUMN IF NOT EXISTS drawings JSONB NOT NULL DEFAULT '[]';
+
 CREATE TABLE IF NOT EXISTS board_tokens (
     id SERIAL PRIMARY KEY,
     board_state_id INTEGER NOT NULL REFERENCES board_states(id) ON DELETE CASCADE,

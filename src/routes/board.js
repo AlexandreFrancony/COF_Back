@@ -110,7 +110,7 @@ router.get('/campaigns/:campaignId/board', async (req, res) => {
  * PATCH /campaigns/:campaignId/board — GM only.
  * Body: { background_url, background_type, grid_visible, grid_size,
  *         camera_x, camera_y, camera_width, camera_width_delta, initiative_visible,
- *         music_url, music_playing, music_volume }
+ *         music_url, music_playing, music_volume, fog_enabled, fog_revealed, handout_url }
  * background_type ('image' | 'video') tells the frontend how to render background_url —
  * a video plays fullscreen/looped/muted behind the grid/zones/tokens instead of being used
  * as a CSS background-image (p.ex. pour une ambiance sonore/visuelle hors combat).
@@ -122,6 +122,9 @@ router.get('/campaigns/:campaignId/board', async (req, res) => {
  * the window a sane size and roughly on-scene; exact edge-of-scene clamping is left to the GM.
  * music_url/music_playing/music_volume run independently of background_url/type — an ambiance
  * track plays alongside whatever visual background is showing, not instead of it.
+ * fog_revealed is always sent as the full array (the GM's paint UI computes reveal/hide client
+ * side off the current board it already has) — same one-shot-on-release pattern as everything
+ * else dragged on this board, not a request per cell touched.
  */
 router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
   try {
@@ -134,6 +137,7 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
       camera_x, camera_y, camera_width, camera_width_delta,
       token_size_delta, initiative_visible,
       music_url, music_playing, music_volume,
+      fog_enabled, fog_revealed, handout_url,
     } = req.body;
     await pool.query(
       `UPDATE board_states SET
@@ -155,7 +159,10 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
          initiative_visible = COALESCE($11, initiative_visible),
          music_url = COALESCE($12, music_url),
          music_playing = COALESCE($13, music_playing),
-         music_volume = COALESCE($14, music_volume)
+         music_volume = COALESCE($14, music_volume),
+         fog_enabled = COALESCE($15, fog_enabled),
+         fog_revealed = COALESCE($16::jsonb, fog_revealed),
+         handout_url = COALESCE($17, handout_url)
        WHERE campaign_id = $10`,
       [
         background_url, background_type, grid_visible, grid_size,
@@ -163,6 +170,7 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
         token_size_delta,
         req.params.campaignId, initiative_visible,
         music_url, music_playing, music_volume,
+        fog_enabled, fog_revealed ? JSON.stringify(fog_revealed) : null, handout_url,
       ]
     );
 
@@ -277,6 +285,82 @@ router.post('/campaigns/:campaignId/board/ping', requireGm, async (req, res) => 
     res.status(204).end();
   } catch (error) {
     console.error('Error POST board ping:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * POST /campaigns/:campaignId/board/drawings — any campaign member (GM or player), not GM-only:
+ * a quick shared annotation is exactly the kind of thing a player should be able to add too.
+ * Body: { points: [{x, y}, ...], color }. Appended atomically with jsonb's || operator instead
+ * of a client-computed full-array replace — a player and the GM could draw at the same moment,
+ * and a replace would let whichever request lands second silently drop the other's stroke.
+ */
+router.post('/campaigns/:campaignId/board/drawings', async (req, res) => {
+  try {
+    const campaign = await findAccessibleCampaign(req.params.campaignId, req.user);
+    if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
+
+    const { points, color } = req.body;
+    if (!Array.isArray(points) || points.length < 2) {
+      return res.status(400).json({ error: 'Trait invalide' });
+    }
+
+    await getOrCreateBoard(req.params.campaignId);
+    await pool.query(
+      `UPDATE board_states SET drawings = drawings || $1::jsonb WHERE campaign_id = $2`,
+      [JSON.stringify([{ points, color: color || '#ef4444' }]), req.params.campaignId]
+    );
+
+    const board = await getFullBoard(req.params.campaignId);
+    broadcastBoard(req.params.campaignId, board, buildBoardForRole);
+    res.status(201).json(board);
+  } catch (error) {
+    console.error('Error POST board drawings:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * DELETE /campaigns/:campaignId/board/drawings/last — GM only. Removes the most recently added
+ * stroke (whoever drew it) — a quick "oops" undo, not scoped to the caller's own strokes.
+ */
+router.delete('/campaigns/:campaignId/board/drawings/last', requireGm, async (req, res) => {
+  try {
+    const campaign = await findAccessibleCampaign(req.params.campaignId, req.user);
+    if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
+
+    await pool.query(
+      `UPDATE board_states SET drawings =
+         CASE WHEN jsonb_array_length(drawings) > 0 THEN drawings - (jsonb_array_length(drawings) - 1) ELSE drawings END
+       WHERE campaign_id = $1`,
+      [req.params.campaignId]
+    );
+
+    const board = await getFullBoard(req.params.campaignId);
+    broadcastBoard(req.params.campaignId, board, buildBoardForRole);
+    res.json(board);
+  } catch (error) {
+    console.error('Error DELETE board drawings/last:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * DELETE /campaigns/:campaignId/board/drawings — GM only. Clears every stroke.
+ */
+router.delete('/campaigns/:campaignId/board/drawings', requireGm, async (req, res) => {
+  try {
+    const campaign = await findAccessibleCampaign(req.params.campaignId, req.user);
+    if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
+
+    await pool.query(`UPDATE board_states SET drawings = '[]' WHERE campaign_id = $1`, [req.params.campaignId]);
+
+    const board = await getFullBoard(req.params.campaignId);
+    broadcastBoard(req.params.campaignId, board, buildBoardForRole);
+    res.json(board);
+  } catch (error) {
+    console.error('Error DELETE board drawings:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
