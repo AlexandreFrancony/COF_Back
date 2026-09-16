@@ -5,6 +5,15 @@ import { findAccessibleCampaign } from './campaigns.js';
 import { broadcastBoard, broadcastPing } from '../services/boardStream.js';
 import { TOKEN_ENRICHMENT_COLUMNS, TOKEN_ENRICHMENT_JOINS } from '../services/tokenEnrichment.js';
 import { upload } from '../services/uploads.js';
+import { logEvent } from '../services/eventLog.js';
+
+// Board-level events log with no single character to attach to (session_events.character_id
+// is nullable exactly for this) — a friendly name for whatever board_media URL the GM just
+// picked, falling back to the raw URL on the rare miss (e.g. a manually-crafted request).
+async function mediaLabel(url) {
+  const result = await pool.query('SELECT label FROM board_media WHERE url = $1', [url]);
+  return result.rows[0]?.label || url;
+}
 
 const router = Router();
 
@@ -177,6 +186,13 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
     const board = await getFullBoard(req.params.campaignId);
     broadcastBoard(req.params.campaignId, board, buildBoardForRole);
     res.json(board);
+
+    // Logged after responding — a slow history write should never hold up the board update
+    // itself. Only fires for the field that actually changed in THIS request, not on every
+    // PATCH to this do-everything route (a background/handout truthy check, never on the
+    // empty-string clears handleHideHandout etc. send).
+    if (background_url) logEvent(req.params.campaignId, null, 'background_changed', `Fond changé : ${await mediaLabel(background_url)}`);
+    if (handout_url) logEvent(req.params.campaignId, null, 'handout_shown', `Document montré aux joueurs : ${await mediaLabel(handout_url)}`);
   } catch (error) {
     console.error('Error PATCH board:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -366,6 +382,38 @@ router.delete('/campaigns/:campaignId/board/drawings', requireGm, async (req, re
 });
 
 /**
+ * POST /campaigns/:campaignId/board/new-scene — GM only. Clears everything specific to the
+ * current location (tokens, zones, fog, drawings, handout, initiative) in one call instead of
+ * deleting a dozen things by hand between locations. Deliberately leaves the room setup alone —
+ * background/music/camera framing/grid are picked separately, not implied by "new scene".
+ */
+router.post('/campaigns/:campaignId/board/new-scene', requireGm, async (req, res) => {
+  try {
+    const campaign = await findAccessibleCampaign(req.params.campaignId, req.user);
+    if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
+
+    const board = await getOrCreateBoard(req.params.campaignId);
+    await pool.query('DELETE FROM board_tokens WHERE board_state_id = $1', [board.id]);
+    await pool.query('DELETE FROM board_zones WHERE board_state_id = $1', [board.id]);
+    await pool.query(
+      `UPDATE board_states SET
+         fog_enabled = false, fog_revealed = '[]', drawings = '[]', handout_url = NULL,
+         initiative_current_token_id = NULL, initiative_round = 1
+       WHERE id = $1`,
+      [board.id]
+    );
+
+    const fullBoard = await getFullBoard(req.params.campaignId);
+    broadcastBoard(req.params.campaignId, fullBoard, buildBoardForRole);
+    res.json(fullBoard);
+    logEvent(req.params.campaignId, null, 'scene_reset', 'Nouvelle scène');
+  } catch (error) {
+    console.error('Error POST board new-scene:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
  * POST /campaigns/:campaignId/board/tokens — GM only
  */
 router.post('/campaigns/:campaignId/board/tokens', requireGm, async (req, res) => {
@@ -399,6 +447,10 @@ router.post('/campaigns/:campaignId/board/tokens', requireGm, async (req, res) =
     const fullBoard = await getFullBoard(req.params.campaignId);
     broadcastBoard(req.params.campaignId, fullBoard, buildBoardForRole);
     res.status(201).json(fullBoard);
+
+    // Only a bestiary spawn is logged — a plain named pawn or a golem isn't the kind of thing
+    // worth a line in the session recap, but "which monsters actually showed up" is.
+    if (monstre_id != null) logEvent(req.params.campaignId, null, 'monster_added', `${label} ajouté au plateau`);
   } catch (error) {
     console.error('Error POST board token:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
