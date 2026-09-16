@@ -62,7 +62,7 @@ router.post('/login', async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT id, email, display_name, password_hash, role
+      `SELECT id, email, display_name, password_hash, role, discord_id, discord_username, discord_avatar_hash
        FROM users WHERE LOWER(email) = LOWER($1)`,
       [email]
     );
@@ -79,12 +79,19 @@ router.post('/login', async (req, res) => {
 
     const token = generateToken(user);
 
+    // Same shape as GET /auth/me — a fresh login shouldn't need an extra refresh just to show
+    // a Discord avatar already on file (found live: the header icon stayed on its 👤 fallback
+    // right after logging in with email/password until the page was reloaded, because this
+    // response used to omit discord_id/discord_avatar_hash entirely).
     res.json({
       user: {
         id: user.id,
         email: user.email,
         display_name: user.display_name,
         role: user.role,
+        discord_id: user.discord_id,
+        discord_username: user.discord_username,
+        discord_avatar_hash: user.discord_avatar_hash,
       },
       token,
     });
