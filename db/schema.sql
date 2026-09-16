@@ -335,11 +335,27 @@ ALTER TABLE board_states ADD COLUMN IF NOT EXISTS initiative_round INTEGER NOT N
 -- across campaigns/scenarios instead of re-uploading the same file every time.
 CREATE TABLE IF NOT EXISTS board_media (
     id SERIAL PRIMARY KEY,
-    type VARCHAR(10) NOT NULL CHECK (type IN ('image', 'video')),
+    type VARCHAR(10) NOT NULL CHECK (type IN ('image', 'video', 'audio')),
     url TEXT NOT NULL,
     label VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- 'audio' added after the table already existed on an install predating it — the inline CHECK
+-- above only takes effect on a fresh CREATE TABLE, so an existing database needs its constraint
+-- replaced explicitly. Safe to re-run: DROP...IF EXISTS makes this a no-op once already applied.
+ALTER TABLE board_media DROP CONSTRAINT IF EXISTS board_media_type_check;
+ALTER TABLE board_media ADD CONSTRAINT board_media_type_check CHECK (type IN ('image', 'video', 'audio'));
+
+-- An ambiance track plays independently of the visual background (image or looping video) —
+-- both can be active at once, e.g. a dungeon image with a soundtrack underneath. Decoupled from
+-- board_media.id the same way background_url is: once picked, the URL is copied here so deleting
+-- the library entry later doesn't silently cut the music mid-session. music_playing lets the GM
+-- pause the ambiance without clearing the track (a tense narration beat), music_volume persists
+-- across the whole room's playback (GM/projector), not just one browser's local slider.
+ALTER TABLE board_states ADD COLUMN IF NOT EXISTS music_url TEXT;
+ALTER TABLE board_states ADD COLUMN IF NOT EXISTS music_playing BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE board_states ADD COLUMN IF NOT EXISTS music_volume REAL NOT NULL DEFAULT 0.5;
 
 CREATE TABLE IF NOT EXISTS board_tokens (
     id SERIAL PRIMARY KEY,

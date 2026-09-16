@@ -109,7 +109,8 @@ router.get('/campaigns/:campaignId/board', async (req, res) => {
 /**
  * PATCH /campaigns/:campaignId/board — GM only.
  * Body: { background_url, background_type, grid_visible, grid_size,
- *         camera_x, camera_y, camera_width, camera_width_delta, initiative_visible }
+ *         camera_x, camera_y, camera_width, camera_width_delta, initiative_visible,
+ *         music_url, music_playing, music_volume }
  * background_type ('image' | 'video') tells the frontend how to render background_url —
  * a video plays fullscreen/looped/muted behind the grid/zones/tokens instead of being used
  * as a CSS background-image (p.ex. pour une ambiance sonore/visuelle hors combat).
@@ -119,6 +120,8 @@ router.get('/campaigns/:campaignId/board', async (req, res) => {
  * a zoom +/- click (same reasoning as board_zones' size_delta: a client-computed absolute value
  * would drop clicks fired before the previous response updates local state). Clamped to keep
  * the window a sane size and roughly on-scene; exact edge-of-scene clamping is left to the GM.
+ * music_url/music_playing/music_volume run independently of background_url/type — an ambiance
+ * track plays alongside whatever visual background is showing, not instead of it.
  */
 router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
   try {
@@ -130,6 +133,7 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
       background_url, background_type, grid_visible, grid_size,
       camera_x, camera_y, camera_width, camera_width_delta,
       token_size_delta, initiative_visible,
+      music_url, music_playing, music_volume,
     } = req.body;
     await pool.query(
       `UPDATE board_states SET
@@ -148,13 +152,17 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
            WHEN $9::int IS NOT NULL THEN LEAST(80, GREATEST(20, token_size + $9))
            ELSE token_size
          END,
-         initiative_visible = COALESCE($11, initiative_visible)
+         initiative_visible = COALESCE($11, initiative_visible),
+         music_url = COALESCE($12, music_url),
+         music_playing = COALESCE($13, music_playing),
+         music_volume = COALESCE($14, music_volume)
        WHERE campaign_id = $10`,
       [
         background_url, background_type, grid_visible, grid_size,
         camera_x, camera_y, camera_width, camera_width_delta,
         token_size_delta,
         req.params.campaignId, initiative_visible,
+        music_url, music_playing, music_volume,
       ]
     );
 

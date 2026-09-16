@@ -1,37 +1,15 @@
 import { Router } from 'express';
 import path from 'path';
 import fs from 'fs';
-import multer from 'multer';
 import pool from '../db/pool.js';
 import { authenticateToken, requireGm } from '../middleware/auth.js';
+import { mediaUpload as upload, UPLOADS_DIR } from '../services/uploads.js';
 
 const router = Router();
 router.use(authenticateToken);
 
-const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads');
-fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-
-// Separate from board.js's image-only uploader (token portraits): the media library also
-// accepts mp4 ambiance videos, which need a much higher size limit than a token/background image.
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: UPLOADS_DIR,
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase();
-      cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
-    },
-  }),
-  limits: { fileSize: 200 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (!/^(image\/(png|jpe?g|webp|gif)|video\/mp4)$/.test(file.mimetype)) {
-      return cb(new Error('Format non supporté (image ou vidéo mp4 uniquement)'));
-    }
-    cb(null, true);
-  },
-});
-
 /**
- * GET /board-media — GM only. Lists the reusable background library (images + videos),
+ * GET /board-media — GM only. Lists the reusable media library (images, videos, audio tracks),
  * newest first, so a GM can pick a fond/ambiance already uploaded instead of re-uploading it.
  */
 router.get('/board-media', requireGm, async (req, res) => {
@@ -45,15 +23,16 @@ router.get('/board-media', requireGm, async (req, res) => {
 });
 
 /**
- * POST /board-media — GM only, multipart field "file". Uploads an image or mp4 video into
- * the library and returns the created record; the caller still has to PATCH a board's
- * background_url/background_type to actually use it.
+ * POST /board-media — GM only, multipart field "file". Uploads an image, mp4 video, or audio
+ * track into the library and returns the created record; the caller still has to PATCH a
+ * board's background_url/background_type (image/video) or music_url (audio) to actually use it.
  */
 router.post('/board-media', requireGm, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Aucun fichier fourni' });
 
-    const type = req.file.mimetype.startsWith('video/') ? 'video' : 'image';
+    const type = req.file.mimetype.startsWith('video/') ? 'video'
+      : req.file.mimetype.startsWith('audio/') ? 'audio' : 'image';
     const url = `/uploads/${req.file.filename}`;
     const label = req.body.label || req.file.originalname;
 
