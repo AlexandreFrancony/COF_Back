@@ -2,7 +2,7 @@ import { Router } from 'express';
 import pool from '../db/pool.js';
 import { authenticateToken, requireGm } from '../middleware/auth.js';
 import { findAccessibleCampaign } from './campaigns.js';
-import { broadcastBoard } from '../services/boardStream.js';
+import { broadcastBoard, broadcastPing } from '../services/boardStream.js';
 import { TOKEN_ENRICHMENT_COLUMNS, TOKEN_ENRICHMENT_JOINS } from '../services/tokenEnrichment.js';
 import { upload } from '../services/uploads.js';
 
@@ -261,6 +261,27 @@ router.post('/campaigns/:campaignId/board/upload', requireGm, upload.single('ima
 });
 
 /**
+ * POST /campaigns/:campaignId/board/ping — GM only. Body: { x, y } (% of the scene). Broadcasts
+ * a transient pointer to every viewer — never persisted, nothing to fetch back on page load.
+ */
+router.post('/campaigns/:campaignId/board/ping', requireGm, async (req, res) => {
+  try {
+    const campaign = await findAccessibleCampaign(req.params.campaignId, req.user);
+    if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
+
+    const { x, y } = req.body;
+    if (typeof x !== 'number' || typeof y !== 'number') {
+      return res.status(400).json({ error: 'Coordonnées invalides' });
+    }
+    broadcastPing(req.params.campaignId, x, y);
+    res.status(204).end();
+  } catch (error) {
+    console.error('Error POST board ping:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
  * POST /campaigns/:campaignId/board/tokens — GM only
  */
 router.post('/campaigns/:campaignId/board/tokens', requireGm, async (req, res) => {
@@ -319,12 +340,13 @@ router.patch('/board/tokens/:tokenId', requireGm, async (req, res) => {
 
     const {
       label, image_url, color, x, y, visible_to_players, hp_delta,
-      hide_hp_from_players, player_hp_label,
+      hide_hp_from_players, player_hp_label, status_icons,
     } = req.body;
     // hp_delta (not an absolute value) applies atomically in SQL, same reasoning as board_zones'
     // size_delta — a GM clicking a creature's PV +/- rapidly would otherwise drop in-flight
     // clicks fired before the previous response's state lands. Clamped to [0, hp_max]; a no-op
-    // (CASE ... ELSE hp_current) for a plain pawn that never had hp_max set.
+    // (CASE ... ELSE hp_current) for a plain pawn that never had hp_max set. status_icons is
+    // always sent as the full array (the GM UI manages add/remove locally), not a delta.
     await pool.query(
       `UPDATE board_tokens SET
          label = COALESCE($1, label),
@@ -339,9 +361,13 @@ router.patch('/board/tokens/:tokenId', requireGm, async (req, res) => {
            ELSE hp_current
          END,
          hide_hp_from_players = COALESCE($9, hide_hp_from_players),
-         player_hp_label = COALESCE($10, player_hp_label)
+         player_hp_label = COALESCE($10, player_hp_label),
+         status_icons = COALESCE($11::jsonb, status_icons)
        WHERE id = $8`,
-      [label, image_url, color, x, y, visible_to_players, hp_delta, req.params.tokenId, hide_hp_from_players, player_hp_label]
+      [
+        label, image_url, color, x, y, visible_to_players, hp_delta, req.params.tokenId,
+        hide_hp_from_players, player_hp_label, status_icons ? JSON.stringify(status_icons) : null,
+      ]
     );
 
     const fullBoard = await getFullBoard(campaign_id);

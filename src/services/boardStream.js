@@ -19,3 +19,12 @@ export function broadcastBoard(campaignId, board, buildBoardForRole) {
     writeSseEvent(res, 'board', buildBoardForRole(board, role));
   }
 }
+
+// A transient pointer ("look here") — never persisted, same (x, y) reaches every viewer
+// (GM included, via their own board-stream connection) as a one-off 'ping' event on the same
+// SSE connection as 'board'. No role-filtering: where the GM points is never sensitive.
+export function broadcastPing(campaignId, x, y) {
+  for (const { res } of hub.getSubscribers(campaignId)) {
+    writeSseEvent(res, 'ping', { x, y });
+  }
+}

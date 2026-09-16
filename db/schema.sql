@@ -430,6 +430,12 @@ ALTER TABLE board_tokens ADD COLUMN IF NOT EXISTS player_hp_label VARCHAR(20);
 ALTER TABLE scenario_tokens ADD COLUMN IF NOT EXISTS hide_hp_from_players BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE scenario_tokens ADD COLUMN IF NOT EXISTS player_hp_label VARCHAR(20);
 
+-- Small visual condition markers (poisoned, on fire, prone...) a GM toggles on any pawn —
+-- an array of emoji strings, shown to everyone the pawn itself is shown to (never stripped by
+-- hide_hp_from_players: a condition badge isn't a numeric stat leak the way PV is). Live combat
+-- state, not something a scenario preps ahead of time, so scenario_tokens doesn't need this.
+ALTER TABLE board_tokens ADD COLUMN IF NOT EXISTS status_icons JSONB NOT NULL DEFAULT '[]';
+
 -- Area-of-effect markers (explosion, cone, line...) drawn over the board, same visibility
 -- model as tokens. x/y is the anchor point (center for circle, origin for rectangle/cone);
 -- size/width are percentages of the board width; rotation in degrees orients rectangle/cone.
