@@ -180,6 +180,14 @@ CREATE TABLE IF NOT EXISTS rules_monstres (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- emoji is a sensible default look for a pawn spawned from this entry (a pion never had its
+-- own avatar_emoji the way a character does — see BoardCanvas.jsx's resolveAvatar), seeded by
+-- hand for all 83 entries rather than left blank. image_url is the GM's own opt-in replacement
+-- (a real illustration) once uploaded via POST /rules/monstres/:id/image — NULL means "just use
+-- the emoji", not "broken".
+ALTER TABLE rules_monstres ADD COLUMN IF NOT EXISTS emoji VARCHAR(8);
+ALTER TABLE rules_monstres ADD COLUMN IF NOT EXISTS image_url TEXT;
+
 CREATE TABLE IF NOT EXISTS rules_monstre_capacites (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) UNIQUE NOT NULL,

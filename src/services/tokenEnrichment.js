@@ -11,7 +11,7 @@ export const TOKEN_ENRICHMENT_COLUMNS = `
               m.name AS monstre_name, m.category AS monstre_category, m.nc AS monstre_nc,
               m.caracteristiques AS monstre_caracteristiques, m.defense AS monstre_defense,
               m.initiative AS monstre_initiative, m.attaques AS monstre_attaques,
-              m.capacites AS monstre_capacites`;
+              m.capacites AS monstre_capacites, m.emoji AS monstre_emoji, m.image_url AS monstre_image_url`;
 
 export const TOKEN_ENRICHMENT_JOINS = `
        LEFT JOIN characters owner ON owner.id = t.owner_character_id

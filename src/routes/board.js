@@ -1,34 +1,12 @@
 import { Router } from 'express';
-import path from 'path';
-import fs from 'fs';
-import multer from 'multer';
 import pool from '../db/pool.js';
 import { authenticateToken, requireGm } from '../middleware/auth.js';
 import { findAccessibleCampaign } from './campaigns.js';
 import { broadcastBoard } from '../services/boardStream.js';
 import { TOKEN_ENRICHMENT_COLUMNS, TOKEN_ENRICHMENT_JOINS } from '../services/tokenEnrichment.js';
+import { upload } from '../services/uploads.js';
 
 const router = Router();
-
-const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads');
-fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: UPLOADS_DIR,
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase();
-      cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
-    },
-  }),
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (!/^image\/(png|jpe?g|webp|gif)$/.test(file.mimetype)) {
-      return cb(new Error("Format d'image non supporté"));
-    }
-    cb(null, true);
-  },
-});
 
 export async function getOrCreateBoard(campaignId) {
   const existing = await pool.query('SELECT * FROM board_states WHERE campaign_id = $1', [campaignId]);
