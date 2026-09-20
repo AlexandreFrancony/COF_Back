@@ -169,7 +169,11 @@ CREATE TABLE IF NOT EXISTS rules_armes (
 CREATE TABLE IF NOT EXISTS rules_monstres (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    category VARCHAR(20) NOT NULL CHECK (category IN ('humanoide', 'animal', 'fantastique')),
+    -- Mostly a taxonomic type (humanoide/animal/fantastique), but also doubles as a scenario
+    -- grouping for a one-off adventure's full monster roster (e.g. calice_ch2) so the GM can
+    -- find everything a given chapter needs in one bestiary tab instead of hunting across the
+    -- three generic categories mid-session.
+    category VARCHAR(20) NOT NULL CHECK (category IN ('humanoide', 'animal', 'fantastique', 'calice_ch2')),
     nc VARCHAR(10) NOT NULL, -- e.g. '1/2', '4', '2 (3)', '8+' — kept as-is, not a plain integer
     caracteristiques JSONB NOT NULL DEFAULT '{}',
     defense INTEGER NOT NULL,
@@ -187,6 +191,12 @@ CREATE TABLE IF NOT EXISTS rules_monstres (
 -- the emoji", not "broken".
 ALTER TABLE rules_monstres ADD COLUMN IF NOT EXISTS emoji VARCHAR(8);
 ALTER TABLE rules_monstres ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+-- 'calice_ch2' added after the table already existed on an install predating it — same reasoning
+-- as board_media's own type constraint below: CREATE TABLE IF NOT EXISTS alone doesn't update an
+-- existing table's CHECK, so it needs restating explicitly. Safe to re-run.
+ALTER TABLE rules_monstres DROP CONSTRAINT IF EXISTS rules_monstres_category_check;
+ALTER TABLE rules_monstres ADD CONSTRAINT rules_monstres_category_check CHECK (category IN ('humanoide', 'animal', 'fantastique', 'calice_ch2'));
 
 CREATE TABLE IF NOT EXISTS rules_monstre_capacites (
     id SERIAL PRIMARY KEY,
