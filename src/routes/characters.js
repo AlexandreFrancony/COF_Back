@@ -413,6 +413,9 @@ router.patch('/characters/:id', async (req, res) => {
       // the owning player on their own sheet, or the GM straight from the board pawn.
       // canAccessCharacter (above) already gates this to just those two.
       destin,
+      // Same reasoning: a player naming their own sword is just flavor, no different from
+      // editing notes/equipement — owner-or-GM is enough, no isGm gate needed.
+      arme_principale_qualite, arme_secondaire_qualite,
     } = req.body;
     const armureIdProvided = 'armure_id' in req.body;
     const bouclierIdProvided = 'bouclier_id' in req.body;
@@ -464,7 +467,9 @@ router.patch('/characters/:id', async (req, res) => {
          pieces_argent = COALESCE($33, pieces_argent),
          pieces_or = COALESCE($34, pieces_or),
          pieces_platine = COALESCE($35, pieces_platine),
-         destin = COALESCE($36, destin)
+         destin = COALESCE($36, destin),
+         arme_principale_qualite = COALESCE($38::jsonb, arme_principale_qualite),
+         arme_secondaire_qualite = COALESCE($39::jsonb, arme_secondaire_qualite)
        WHERE id = $37`,
       [
         name, profil_id, peuple_id, level,
@@ -483,6 +488,8 @@ router.patch('/characters/:id', async (req, res) => {
         pieces_cuivre, pieces_argent, pieces_or, pieces_platine,
         destin,
         req.params.id,
+        arme_principale_qualite ? JSON.stringify(arme_principale_qualite) : null,
+        arme_secondaire_qualite ? JSON.stringify(arme_secondaire_qualite) : null,
       ]
     );
 

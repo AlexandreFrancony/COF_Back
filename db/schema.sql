@@ -255,6 +255,15 @@ CREATE TABLE IF NOT EXISTS characters (
     bouclier_id INTEGER REFERENCES rules_armures(id) ON DELETE SET NULL, -- stacks with armure_id (p.188)
     arme_principale_id INTEGER REFERENCES rules_armes(id) ON DELETE SET NULL,
     arme_secondaire_id INTEGER REFERENCES rules_armes(id) ON DELETE SET NULL, -- e.g. dual-wielding
+    -- Per-instance flavor on top of the shared rules_armes catalog entry: a custom name (e.g.
+    -- "Tranchecœur" instead of "Épée courte"), a rarity tier driving the display color/shimmer
+    -- (commun/plus1/plus2/plus3/legendaire — cosmetic only, no numeric bonus is computed from
+    -- it: COF2's valeur d'attaque doesn't depend on which weapon is equipped, see
+    -- characterCalculations.js), and free-text effects for anything with unique rules (a
+    -- legendary weapon like Shântoun, Calice T1 p.153). {} means "just show the base weapon
+    -- name plainly" — every character has this by default, nothing to backfill.
+    arme_principale_qualite JSONB NOT NULL DEFAULT '{}',
+    arme_secondaire_qualite JSONB NOT NULL DEFAULT '{}',
     notes TEXT,
     -- The human peuple's rang-1 "Diversité" capacité (p.46) requires picking a geographic/social
     -- origin (or a custom gagne-pain) — free text since the +3 bonus it grants is to narrative
