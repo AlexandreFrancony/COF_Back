@@ -413,9 +413,6 @@ router.patch('/characters/:id', async (req, res) => {
       // the owning player on their own sheet, or the GM straight from the board pawn.
       // canAccessCharacter (above) already gates this to just those two.
       destin,
-      // Same reasoning: a player naming their own sword is just flavor, no different from
-      // editing notes/equipement — owner-or-GM is enough, no isGm gate needed.
-      arme_principale_qualite, arme_secondaire_qualite,
     } = req.body;
     const armureIdProvided = 'armure_id' in req.body;
     const bouclierIdProvided = 'bouclier_id' in req.body;
@@ -429,6 +426,9 @@ router.patch('/characters/:id', async (req, res) => {
     const {
       capacity_points_available, forgets_available, pv_body_total,
       pc_bonus_orphan, dr_bonus_orphan, pm_bonus_orphan,
+      // The GM alone names/grades a weapon and sets its magic bonus — a player can equip
+      // whatever's in the shared arme library, but not reword or reprice it.
+      arme_principale_qualite, arme_secondaire_qualite,
     } = isGm ? req.body : {};
 
     // Character-creation finalize: profil_id goes from unset to set. Seed the PV ledger here
