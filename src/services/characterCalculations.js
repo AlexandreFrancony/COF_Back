@@ -52,25 +52,25 @@ export function computeValeursAttaque(level, caracteristiques) {
   };
 }
 
-// A handful of capacités let a character use a "better" caractéristique in place of the usual
-// one for a specific formula (e.g. the forgesort's Grosse tête, p.176: INT instead of CON for
-// PV, "s'il le souhaite" — modeled here as an automatic max() rather than a stored per-player
-// choice, since the book only ever offers this as a strict upside). Data-driven off
-// rules_capacites.effect so a future capacité with the same shape needs no code change, only a
-// row: { type: 'stat_substitute_max', in: 'pv_max', replace: 'CON', with: 'INT' }.
-// capaciteEffects is every effect JSONB a character currently owns (any rang/voie), already
-// rang-gated by the caller's join — this only reads entries whose `in` matches the formula
-// being computed, everything else is silently ignored (forward-compatible with effect types
-// this function doesn't know about yet).
-function applyStatSubstitutions(caracteristiques, capaciteEffects, formulaName) {
-  let result = caracteristiques;
+// pv_max's CON contribution is a per-level accumulation (CON added at every level, simplified
+// here as CON × level rather than a real per-level ledger — see computeDerivedStats' JSDoc: CON
+// is recomputed live, not stored per level). A handful of capacités let a character use a
+// "better" caractéristique in place of CON for this — but the only real case found so far, the
+// forgesort's Grosse tête (p.176), is explicit that it only applies "au premier niveau" ("s'il
+// le souhaite" — modeled as an automatic max() rather than a stored per-player choice, since the
+// book only ever offers this as a strict upside): so it substitutes just the level-1 unit of
+// that sum, not the whole multiplier — CON alone still applies to every level after that.
+// Data-driven off rules_capacites.effect: { type: 'stat_substitute_max', in: 'pv_max',
+// replace: 'CON', with: 'INT', scope: 'level1' }. capaciteEffects is every effect JSONB a
+// character currently owns (any rang/voie), already rang-gated by the caller's join.
+function pvMaxConTerm(caracteristiques, capaciteEffects, level) {
+  let level1Stat = caracteristiques.CON;
   for (const effect of capaciteEffects) {
-    if (effect?.type === 'stat_substitute_max' && effect.in === formulaName) {
-      const better = Math.max(result[effect.replace], result[effect.with]);
-      if (better !== result[effect.replace]) result = { ...result, [effect.replace]: better };
+    if (effect?.type === 'stat_substitute_max' && effect.in === 'pv_max' && effect.scope === 'level1') {
+      level1Stat = Math.max(level1Stat, caracteristiques[effect.with]);
     }
   }
-  return result;
+  return level1Stat + caracteristiques.CON * (level - 1);
 }
 
 /**
@@ -99,9 +99,8 @@ export function computeDerivedStats(
   capaciteEffects = []
 ) {
   const { caracteristiques: c, level } = character;
-  const cForPv = applyStatSubstitutions(c, capaciteEffects, 'pv_max');
   return {
-    pv_max: character.pv_body_total + cForPv.CON * level,
+    pv_max: character.pv_body_total + pvMaxConTerm(c, capaciteEffects, level),
     dr_max: computeDrCount(c.CON, familleRow.dr_bonus + character.dr_bonus_orphan),
     dr_die: familleRow.dr_die,
     points_chance: computePc(c.CHA, familleRow.pc_bonus + character.pc_bonus_orphan + (hasHumanOrigin ? 1 : 0)),
