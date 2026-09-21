@@ -61,16 +61,39 @@ export function computeValeursAttaque(level, caracteristiques) {
 // book only ever offers this as a strict upside): so it substitutes just the level-1 unit of
 // that sum, not the whole multiplier — CON alone still applies to every level after that.
 // Data-driven off rules_capacites.effect: { type: 'stat_substitute_max', in: 'pv_max',
-// replace: 'CON', with: 'INT', scope: 'level1' }. capaciteEffects is every effect JSONB a
-// character currently owns (any rang/voie), already rang-gated by the caller's join.
+// replace: 'CON', with: 'INT', scope: 'level1' }. capaciteEffects is [{ effect, voieRang }] for
+// every effect JSONB a character currently owns (any rang/voie), already rang-gated by the
+// caller's join.
 function pvMaxConTerm(caracteristiques, capaciteEffects, level) {
   let level1Stat = caracteristiques.CON;
-  for (const effect of capaciteEffects) {
+  for (const { effect } of capaciteEffects) {
     if (effect?.type === 'stat_substitute_max' && effect.in === 'pv_max' && effect.scope === 'level1') {
       level1Stat = Math.max(level1Stat, caracteristiques[effect.with]);
     }
   }
   return level1Stat + caracteristiques.CON * (level - 1);
+}
+
+// A voie's own text sometimes grants a flat bonus to one of this app's computed stats that
+// scales with how far the voie has been raised (e.g. the forgesort's Runes de défense, p.190:
+// "+2 en DEF... augmente de +1 au rang 3 puis au rang 5") — unlike pv_max's CON term this isn't
+// a per-level accumulation, it's a flat add keyed to the OWNING voie's rang, so it needs
+// voieRang (not the character's level) to resolve. A single capacité can bonus more than one
+// stat with different amounts (e.g. Tour de magie: +1 DEF and +2 PM), hence the `bonuses` list.
+// Data-driven off rules_capacites.effect: { type: 'flat_bonus_by_rang', bonuses: [{ in: 'pm_max',
+// thresholds: [{ rang: 1, amount: 2 }, ...] }, ...] } — only the highest threshold met applies,
+// they don't stack with each other.
+function flatBonusFor(capaciteEffects, formulaName) {
+  let total = 0;
+  for (const { effect, voieRang } of capaciteEffects) {
+    if (effect?.type !== 'flat_bonus_by_rang') continue;
+    for (const bonus of effect.bonuses || []) {
+      if (bonus.in !== formulaName) continue;
+      const applicable = bonus.thresholds.filter((t) => voieRang >= t.rang);
+      if (applicable.length > 0) total += Math.max(...applicable.map((t) => t.amount));
+    }
+  }
+  return total;
 }
 
 /**
@@ -91,8 +114,9 @@ function pvMaxConTerm(caracteristiques, capaciteEffects, level) {
  *   armor/weapon cross-restrictions (p.177-178), left to the GM at the table.
  * @param {number} bouclierBonus - flat DEF bonus from the character's equipped shield
  *   (rules_armures type='bouclier', 0 if none).
- * @param {object[]} capaciteEffects - every non-null rules_capacites.effect the character
- *   currently owns (rang-gated), e.g. for the pv_max CON/INT substitution above.
+ * @param {object[]} capaciteEffects - [{ effect, voieRang }] for every non-null
+ *   rules_capacites.effect the character currently owns (rang-gated), e.g. for the pv_max
+ *   CON/INT substitution or a rang-scaling flat bonus above.
  */
 export function computeDerivedStats(
   familleRow, character, sortsCount, hasHumanOrigin = false, armureBonus = 0, bouclierBonus = 0,
@@ -104,9 +128,9 @@ export function computeDerivedStats(
     dr_max: computeDrCount(c.CON, familleRow.dr_bonus + character.dr_bonus_orphan),
     dr_die: familleRow.dr_die,
     points_chance: computePc(c.CHA, familleRow.pc_bonus + character.pc_bonus_orphan + (hasHumanOrigin ? 1 : 0)),
-    pm_max: computePmMax(sortsCount, c.VOL) + character.pm_bonus_orphan,
-    initiative: computeInitiative(c.PER),
-    defense: computeDefenseBase(c.AGI, armureBonus, bouclierBonus),
+    pm_max: computePmMax(sortsCount, c.VOL) + character.pm_bonus_orphan + flatBonusFor(capaciteEffects, 'pm_max'),
+    initiative: computeInitiative(c.PER) + flatBonusFor(capaciteEffects, 'initiative'),
+    defense: computeDefenseBase(c.AGI, armureBonus, bouclierBonus) + flatBonusFor(capaciteEffects, 'defense'),
     valeurs_attaque: computeValeursAttaque(level, c),
   };
 }
