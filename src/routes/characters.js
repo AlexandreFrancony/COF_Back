@@ -143,7 +143,8 @@ async function broadcastCharacterSheet(characterId, updated) {
 // tracks which ones have already landed. Only official capacités get this treatment: a homebrew
 // one is specific enough to a single character to just apply by hand via the GM editor instead.
 // Data-driven off rules_capacites.effect: { type: 'stat_permanent_increase', increases: { INT: 1,
-// VOL: 1 } }.
+// VOL: 1 } } — a 'PV' key bumps pv_body_total (the ledger, p.176) instead of a caractéristique,
+// for a capacité that grants flat bonus PV (e.g. Ainée's homebrew "Peintures de guerre": +5 PV).
 async function applyPermanentCapaciteBonuses(characterId) {
   const pending = await pool.query(
     `SELECT c.id, c.effect FROM character_voies cv
@@ -157,15 +158,20 @@ async function applyPermanentCapaciteBonuses(characterId) {
   );
   if (pending.rows.length === 0) return;
 
-  const current = await pool.query('SELECT caracteristiques FROM characters WHERE id = $1', [characterId]);
+  const current = await pool.query('SELECT caracteristiques, pv_body_total FROM characters WHERE id = $1', [characterId]);
   const caracteristiques = { ...current.rows[0].caracteristiques };
+  let pvBodyTotal = current.rows[0].pv_body_total;
   for (const { effect } of pending.rows) {
     for (const [stat, delta] of Object.entries(effect.increases || {})) {
-      caracteristiques[stat] = (caracteristiques[stat] || 0) + delta;
+      if (stat === 'PV') pvBodyTotal += delta;
+      else caracteristiques[stat] = (caracteristiques[stat] || 0) + delta;
     }
   }
 
-  await pool.query('UPDATE characters SET caracteristiques = $1 WHERE id = $2', [JSON.stringify(caracteristiques), characterId]);
+  await pool.query(
+    'UPDATE characters SET caracteristiques = $1, pv_body_total = $2 WHERE id = $3',
+    [JSON.stringify(caracteristiques), pvBodyTotal, characterId]
+  );
   const values = pending.rows.map((_, i) => `($1, $${i + 2})`).join(', ');
   await pool.query(
     `INSERT INTO character_applied_capacite_bonuses (character_id, capacite_id) VALUES ${values}`,
