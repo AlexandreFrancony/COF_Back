@@ -323,6 +323,17 @@ CREATE TABLE IF NOT EXISTS character_planned_voies (
     PRIMARY KEY (character_id, voie_id)
 );
 
+-- Marks a rules_capacites.effect of type 'stat_permanent_increase' as already applied to a
+-- character's caracteristiques (e.g. Voie du mage's rang-4 "Esprit supérieur": INT+1, VOL+1) —
+-- unlike a live-recomputed bonus, this one mutates the stored value once, so a marker is the
+-- only way to keep a later recompute from adding it again.
+CREATE TABLE IF NOT EXISTS character_applied_capacite_bonuses (
+    character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+    capacite_id INTEGER NOT NULL REFERENCES rules_capacites(id) ON DELETE CASCADE,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (character_id, capacite_id)
+);
+
 CREATE TABLE IF NOT EXISTS campaign_invites (
     id SERIAL PRIMARY KEY,
     campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,

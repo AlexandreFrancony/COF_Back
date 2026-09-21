@@ -137,7 +137,44 @@ async function broadcastCharacterSheet(characterId, updated) {
  * by the amount gained, per the rulebook — never truncates whatever was already spent).
  * Always returns the character with its nested voies (see getCharacterWithVoies).
  */
+// Some capacités permanently increase a caractéristique (e.g. Voie du mage's rang-4 "Esprit
+// supérieur": INT+1, VOL+1) rather than feeding a live-recomputed formula — applying it on every
+// recompute would silently inflate the character forever, so character_applied_capacite_bonuses
+// tracks which ones have already landed. Only official capacités get this treatment: a homebrew
+// one is specific enough to a single character to just apply by hand via the GM editor instead.
+// Data-driven off rules_capacites.effect: { type: 'stat_permanent_increase', increases: { INT: 1,
+// VOL: 1 } }.
+async function applyPermanentCapaciteBonuses(characterId) {
+  const pending = await pool.query(
+    `SELECT c.id, c.effect FROM character_voies cv
+     JOIN rules_capacites c ON c.voie_id = cv.voie_id AND c.rang <= cv.rang
+     WHERE cv.character_id = $1 AND c.effect->>'type' = 'stat_permanent_increase'
+       AND NOT EXISTS (
+         SELECT 1 FROM character_applied_capacite_bonuses b
+         WHERE b.character_id = cv.character_id AND b.capacite_id = c.id
+       )`,
+    [characterId]
+  );
+  if (pending.rows.length === 0) return;
+
+  const current = await pool.query('SELECT caracteristiques FROM characters WHERE id = $1', [characterId]);
+  const caracteristiques = { ...current.rows[0].caracteristiques };
+  for (const { effect } of pending.rows) {
+    for (const [stat, delta] of Object.entries(effect.increases || {})) {
+      caracteristiques[stat] = (caracteristiques[stat] || 0) + delta;
+    }
+  }
+
+  await pool.query('UPDATE characters SET caracteristiques = $1 WHERE id = $2', [JSON.stringify(caracteristiques), characterId]);
+  const values = pending.rows.map((_, i) => `($1, $${i + 2})`).join(', ');
+  await pool.query(
+    `INSERT INTO character_applied_capacite_bonuses (character_id, capacite_id) VALUES ${values}`,
+    [characterId, ...pending.rows.map((r) => r.id)]
+  );
+}
+
 async function recomputeAndPersist(characterId) {
+  await applyPermanentCapaciteBonuses(characterId);
   const charResult = await pool.query('SELECT * FROM characters WHERE id = $1', [characterId]);
   const character = charResult.rows[0];
   const finish = async () => {
