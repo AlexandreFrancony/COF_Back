@@ -205,8 +205,10 @@ async function recomputeAndPersist(characterId) {
   // ONE facette's voies at a time, so counting every known sort across both facettes would
   // overstate his real PM max. Compute it once per facette (shared voies + that facette's own)
   // and keep the higher result, gated on custom_data.threshold_percent being set (a no-op query
-  // shape change for every other character, who has nothing in either group).
-  const FACETTE_CALME_VOIE_IDS = [76, 78];
+  // shape change for every other character, who has nothing in either group). Voie des artefacts
+  // (76) and Voie de transition (139) are common to both facettes — deliberately absent from
+  // both lists so the "shared" bucket (neither list) picks them up automatically.
+  const FACETTE_CALME_VOIE_IDS = [78, 80];
   const FACETTE_MAGE_VOIE_IDS = [82, 83];
   let sortsCountValue;
   if (character.custom_data?.threshold_percent != null) {
