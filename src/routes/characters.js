@@ -1142,7 +1142,8 @@ router.delete('/characters/:id/voies/:voieId', async (req, res) => {
       [req.params.id, req.params.voieId]
     );
 
-    res.json({ message: 'Voie retirée' });
+    const updated = await recomputeAndPersist(req.params.id); // losing a voie can lower pm_max etc.
+    res.json(updated);
   } catch (error) {
     console.error('Error DELETE /characters/:id/voies/:voieId:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
