@@ -332,6 +332,11 @@ CREATE TABLE IF NOT EXISTS board_states (
     background_type VARCHAR(10) NOT NULL DEFAULT 'image' CHECK (background_type IN ('image', 'video')),
     grid_visible BOOLEAN NOT NULL DEFAULT false,
     grid_size INTEGER NOT NULL DEFAULT 20, -- number of grid columns across the board width
+    -- Toggling this off hides every pawn's name label (and player_hp_label) board-wide, for
+    -- everyone (GM/players/projector) — a real session found that a cluster of tokens in melee
+    -- turns into an unreadable wall of overlapping name tags. HP bars/status icons stay visible;
+    -- only the text label underneath goes away.
+    labels_visible BOOLEAN NOT NULL DEFAULT true,
     -- Camera: the window of the full scene actually shown on the projector, independent from
     -- what the GM sees (always the full scene). x/y is the window's center (% of the scene);
     -- width is its width as % of the scene width. Since the scene and the projector output
@@ -435,6 +440,7 @@ ALTER TABLE campaign_scenarios ADD COLUMN IF NOT EXISTS background_media_id INTE
 ALTER TABLE campaign_scenarios ADD COLUMN IF NOT EXISTS grid_visible BOOLEAN;
 ALTER TABLE campaign_scenarios ADD COLUMN IF NOT EXISTS grid_size INTEGER;
 ALTER TABLE campaign_scenarios ADD COLUMN IF NOT EXISTS token_size INTEGER;
+ALTER TABLE campaign_scenarios ADD COLUMN IF NOT EXISTS labels_visible BOOLEAN;
 
 -- Prepared tokens for a scenario — same shape as board_tokens, but scoped to a scenario
 -- instead of a live board_state, so the GM can lay out an encounter ahead of time without

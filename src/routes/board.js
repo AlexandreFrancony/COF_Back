@@ -117,7 +117,7 @@ router.get('/campaigns/:campaignId/board', async (req, res) => {
 
 /**
  * PATCH /campaigns/:campaignId/board — GM only.
- * Body: { background_url, background_type, grid_visible, grid_size,
+ * Body: { background_url, background_type, grid_visible, grid_size, labels_visible,
  *         camera_x, camera_y, camera_width, camera_width_delta, initiative_visible,
  *         music_url, music_playing, music_volume, fog_enabled, fog_revealed, handout_url }
  * background_type ('image' | 'video') tells the frontend how to render background_url —
@@ -142,7 +142,7 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
 
     await getOrCreateBoard(req.params.campaignId);
     const {
-      background_url, background_type, grid_visible, grid_size,
+      background_url, background_type, grid_visible, grid_size, labels_visible,
       camera_x, camera_y, camera_width, camera_width_delta,
       token_size_delta, initiative_visible,
       music_url, music_playing, music_volume,
@@ -171,7 +171,8 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
          music_volume = COALESCE($14, music_volume),
          fog_enabled = COALESCE($15, fog_enabled),
          fog_revealed = COALESCE($16::jsonb, fog_revealed),
-         handout_url = COALESCE($17, handout_url)
+         handout_url = COALESCE($17, handout_url),
+         labels_visible = COALESCE($18, labels_visible)
        WHERE campaign_id = $10`,
       [
         background_url, background_type, grid_visible, grid_size,
@@ -180,6 +181,7 @@ router.patch('/campaigns/:campaignId/board', requireGm, async (req, res) => {
         req.params.campaignId, initiative_visible,
         music_url, music_playing, music_volume,
         fog_enabled, fog_revealed ? JSON.stringify(fog_revealed) : null, handout_url,
+        labels_visible,
       ]
     );
 

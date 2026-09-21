@@ -130,16 +130,16 @@ router.post('/campaigns/:campaignId/scenarios', requireGm, async (req, res) => {
 
 /**
  * PATCH /scenarios/:id
- * Body: { name, notes, background_media_id, grid_visible, grid_size, token_size_delta }
- * grid_visible/grid_size are absolute (a checkbox and a direct value have no race to guard
- * against); token_size_delta is an atomic server-side delta, same reasoning as board_states'
- * own token_size_delta (see PATCH /campaigns/:campaignId/board) — and the first +/- click ever
- * made on a scenario's token size seeds it off the same 40px default the live board starts at,
- * via COALESCE(token_size, 40), rather than off NULL.
+ * Body: { name, notes, background_media_id, grid_visible, grid_size, labels_visible, token_size_delta }
+ * grid_visible/grid_size/labels_visible are absolute (a checkbox and a direct value have no
+ * race to guard against); token_size_delta is an atomic server-side delta, same reasoning as
+ * board_states' own token_size_delta (see PATCH /campaigns/:campaignId/board) — and the first
+ * +/- click ever made on a scenario's token size seeds it off the same 40px default the live
+ * board starts at, via COALESCE(token_size, 40), rather than off NULL.
  */
 router.patch('/scenarios/:id', requireGm, async (req, res) => {
   try {
-    const { name, notes, background_media_id, grid_visible, grid_size, token_size_delta } = req.body;
+    const { name, notes, background_media_id, grid_visible, grid_size, labels_visible, token_size_delta } = req.body;
     const result = await pool.query(
       `UPDATE campaign_scenarios s SET
          name = COALESCE($1, s.name),
@@ -150,11 +150,12 @@ router.patch('/scenarios/:id', requireGm, async (req, res) => {
          token_size = CASE
            WHEN $6::int IS NOT NULL THEN LEAST(80, GREATEST(20, COALESCE(s.token_size, 40) + $6))
            ELSE s.token_size
-         END
+         END,
+         labels_visible = COALESCE($9, s.labels_visible)
        FROM campaigns c
        WHERE s.id = $7 AND s.campaign_id = c.id AND c.gm_id = $8
        RETURNING s.id`,
-      [name, notes, background_media_id, grid_visible, grid_size, token_size_delta, req.params.id, req.user.id]
+      [name, notes, background_media_id, grid_visible, grid_size, token_size_delta, req.params.id, req.user.id, labels_visible]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Scénario non trouvé' });
     res.json((await enrichScenarios([await getScenarioRow(result.rows[0].id)]))[0]);
@@ -384,12 +385,13 @@ router.post('/scenarios/:id/launch', requireGm, async (req, res) => {
          background_type = CASE WHEN $1::int IS NOT NULL THEN $3 ELSE background_type END,
          grid_visible = COALESCE($4, grid_visible),
          grid_size = COALESCE($5, grid_size),
-         token_size = COALESCE($6, token_size)
+         token_size = COALESCE($6, token_size),
+         labels_visible = COALESCE($8, labels_visible)
        WHERE id = $7`,
       [
         full.background_media_id, full.background_url, full.background_type,
         full.grid_visible, full.grid_size, full.token_size,
-        board.id,
+        board.id, full.labels_visible,
       ]
     );
 
