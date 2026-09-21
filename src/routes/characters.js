@@ -99,7 +99,16 @@ export async function getCharacterWithVoies(characterId) {
     (capacitesByVoie[cap.voie_id] ??= []).push(cap);
   }
 
-  return { ...character, voies: voies.rows.map((v) => ({ ...v, capacites: capacitesByVoie[v.voie_id] || [] })) };
+  const plannedVoies = await pool.query(
+    'SELECT voie_id FROM character_planned_voies WHERE character_id = $1',
+    [characterId]
+  );
+
+  return {
+    ...character,
+    voies: voies.rows.map((v) => ({ ...v, capacites: capacitesByVoie[v.voie_id] || [] })),
+    planned_voie_ids: plannedVoies.rows.map((r) => r.voie_id),
+  };
 }
 
 // Pushes the campaign's board over SSE whenever a character's live stats change, so the
@@ -672,6 +681,42 @@ router.post('/characters/:id/voies', async (req, res) => {
   } catch (error) {
     console.error('Error POST /characters/:id/voies:', error.message);
     res.status(500).json({ error: 'Erreur lors de l\'ajout de la voie' });
+  }
+});
+
+/**
+ * PUT /characters/:id/planned-voies
+ * GM only. Replaces the character's whole "roadmap" (character_planned_voies) with the given
+ * list — a simple checklist edit, not incremental add/remove. Body: { voie_ids: [1, 2, ...] }.
+ * An empty list clears the roadmap, restoring the default (every eligible voie offered).
+ */
+router.put('/characters/:id/planned-voies', requireGm, async (req, res) => {
+  try {
+    const existing = await pool.query('SELECT * FROM characters WHERE id = $1', [req.params.id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Personnage non trouvé' });
+    }
+    if (!(await canAccessCharacter(existing.rows[0], req.user))) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    const voieIds = Array.isArray(req.body.voie_ids) ? req.body.voie_ids : [];
+
+    await pool.query('DELETE FROM character_planned_voies WHERE character_id = $1', [req.params.id]);
+    if (voieIds.length > 0) {
+      const values = voieIds.map((_, i) => `($1, $${i + 2})`).join(', ');
+      await pool.query(
+        `INSERT INTO character_planned_voies (character_id, voie_id) VALUES ${values}`,
+        [req.params.id, ...voieIds]
+      );
+    }
+
+    const updated = await getCharacterWithVoies(req.params.id);
+    await broadcastCharacterSheet(req.params.id, updated);
+    res.json(updated);
+  } catch (error) {
+    console.error('Error PUT /characters/:id/planned-voies:', error.message);
+    res.status(500).json({ error: 'Erreur lors de la mise à jour des voies prévues' });
   }
 });
 

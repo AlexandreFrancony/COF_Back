@@ -313,6 +313,16 @@ CREATE TABLE IF NOT EXISTS character_voies (
     UNIQUE (character_id, voie_id)
 );
 
+-- Roadmap GM-only : les voies qu'un PJ prévoit d'investir plus tard (profil propre, hybride ou
+-- homebrew), décidées à l'avance pour ne proposer que celles-ci en montée de niveau. Une ligne
+-- ici ne signifie pas "acquise" (voir character_voies pour ça) — juste "prévue". Un personnage
+-- sans aucune ligne garde le comportement par défaut (toutes les voies éligibles proposées).
+CREATE TABLE IF NOT EXISTS character_planned_voies (
+    character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+    voie_id INTEGER NOT NULL REFERENCES rules_voies(id) ON DELETE CASCADE,
+    PRIMARY KEY (character_id, voie_id)
+);
+
 CREATE TABLE IF NOT EXISTS campaign_invites (
     id SERIAL PRIMARY KEY,
     campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
