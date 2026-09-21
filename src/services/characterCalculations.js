@@ -52,6 +52,27 @@ export function computeValeursAttaque(level, caracteristiques) {
   };
 }
 
+// A handful of capacités let a character use a "better" caractéristique in place of the usual
+// one for a specific formula (e.g. the forgesort's Grosse tête, p.176: INT instead of CON for
+// PV, "s'il le souhaite" — modeled here as an automatic max() rather than a stored per-player
+// choice, since the book only ever offers this as a strict upside). Data-driven off
+// rules_capacites.effect so a future capacité with the same shape needs no code change, only a
+// row: { type: 'stat_substitute_max', in: 'pv_max', replace: 'CON', with: 'INT' }.
+// capaciteEffects is every effect JSONB a character currently owns (any rang/voie), already
+// rang-gated by the caller's join — this only reads entries whose `in` matches the formula
+// being computed, everything else is silently ignored (forward-compatible with effect types
+// this function doesn't know about yet).
+function applyStatSubstitutions(caracteristiques, capaciteEffects, formulaName) {
+  let result = caracteristiques;
+  for (const effect of capaciteEffects) {
+    if (effect?.type === 'stat_substitute_max' && effect.in === formulaName) {
+      const better = Math.max(result[effect.replace], result[effect.with]);
+      if (better !== result[effect.replace]) result = { ...result, [effect.replace]: better };
+    }
+  }
+  return result;
+}
+
 /**
  * Recomputes every derived stat for a character.
  * @param {object} familleRow - row from rules_familles for the character's PRINCIPAL profil
@@ -70,13 +91,17 @@ export function computeValeursAttaque(level, caracteristiques) {
  *   armor/weapon cross-restrictions (p.177-178), left to the GM at the table.
  * @param {number} bouclierBonus - flat DEF bonus from the character's equipped shield
  *   (rules_armures type='bouclier', 0 if none).
+ * @param {object[]} capaciteEffects - every non-null rules_capacites.effect the character
+ *   currently owns (rang-gated), e.g. for the pv_max CON/INT substitution above.
  */
 export function computeDerivedStats(
-  familleRow, character, sortsCount, hasHumanOrigin = false, armureBonus = 0, bouclierBonus = 0
+  familleRow, character, sortsCount, hasHumanOrigin = false, armureBonus = 0, bouclierBonus = 0,
+  capaciteEffects = []
 ) {
   const { caracteristiques: c, level } = character;
+  const cForPv = applyStatSubstitutions(c, capaciteEffects, 'pv_max');
   return {
-    pv_max: character.pv_body_total + c.CON * level,
+    pv_max: character.pv_body_total + cForPv.CON * level,
     dr_max: computeDrCount(c.CON, familleRow.dr_bonus + character.dr_bonus_orphan),
     dr_die: familleRow.dr_die,
     points_chance: computePc(c.CHA, familleRow.pc_bonus + character.pc_bonus_orphan + (hasHumanOrigin ? 1 : 0)),

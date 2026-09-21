@@ -200,9 +200,22 @@ async function recomputeAndPersist(characterId) {
   const armureBonus = equipment.rows.find((r) => r.id === character.armure_id)?.defense_bonus || 0;
   const bouclierBonus = equipment.rows.find((r) => r.id === character.bouclier_id)?.defense_bonus || 0;
 
+  // Data-driven capacité effects (see characterCalculations.js's applyStatSubstitutions) — most
+  // capacités have no `effect` row (NULL, filtered here) since most of what a voie grants isn't
+  // a number this app computes (an action, a narrative permission, a skill-test bonus with no
+  // tracked skill list) — only the ones that swap into a formula this app already calculates
+  // (pv_max today) need one.
+  const capaciteEffects = await pool.query(
+    `SELECT c.effect FROM character_voies cv
+     JOIN rules_capacites c ON c.voie_id = cv.voie_id AND c.rang <= cv.rang
+     WHERE cv.character_id = $1 AND c.effect IS NOT NULL`,
+    [characterId]
+  );
+
   const derived = computeDerivedStats(
     profil.rows[0], character, sortsCountValue,
-    humanOrigin.rows.length > 0, armureBonus, bouclierBonus
+    humanOrigin.rows.length > 0, armureBonus, bouclierBonus,
+    capaciteEffects.rows.map((r) => r.effect)
   );
 
   const pvGain = Math.max(0, derived.pv_max - character.pv_max);
