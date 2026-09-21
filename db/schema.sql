@@ -88,7 +88,10 @@ CREATE TABLE IF NOT EXISTS rules_voies (
     profil_id INTEGER REFERENCES rules_profils(id),
     peuple_id INTEGER REFERENCES rules_peuples(id),
     niveau_prestige_requis INTEGER,
-    origine_pj VARCHAR(100)
+    origine_pj VARCHAR(100),
+    -- Voie homebrew réservée à un PJ précis (NULL = homebrew ouverte à tous, cf. origine_pj qui
+    -- n'est qu'un libellé d'affichage et ne doit jamais servir de filtre d'accès).
+    origine_pj_character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS rules_capacites (
