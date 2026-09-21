@@ -307,6 +307,66 @@ async function maybeFinalizeLevelPv(characterId) {
   );
 }
 
+// Resolves the actual set of capacités a "grant_capacite_choice" effect currently allows a
+// specific character to pick from (e.g. the Gnome's Don étrange: "une capacité de rang 1
+// d'ensorceleur", or Voie du mage's rang 1: "la capacité de rang 1 de sa voie de peuple
+// d'origine"). Most capacités of this shape name a fixed profil/famille list, but a few refer
+// to the character's OWN build ("sa famille", "sa voie de peuple d'origine") — scope tells
+// which. Data-driven off rules_capacites.effect: { type: 'grant_capacite_choice', rang_min,
+// rang_max, scope: 'profils' | 'familles' | 'any' | 'propre_famille' | 'peuple_origine',
+// profils?: [code], familles?: [code] }.
+async function resolveEligibleCapacites(characterId, effect) {
+  const { rang_min: rangMin, rang_max: rangMax, scope } = effect;
+
+  if (scope === 'peuple_origine') {
+    const char = await pool.query('SELECT peuple_id FROM characters WHERE id = $1', [characterId]);
+    const peupleId = char.rows[0]?.peuple_id;
+    if (!peupleId) return [];
+    const result = await pool.query(
+      `SELECT c.id, c.name, c.rang, c.resume, c.description, c.est_sort,
+              v.id AS voie_id, v.name AS voie_name, v.name AS profil_name
+       FROM rules_capacites c JOIN rules_voies v ON v.id = c.voie_id
+       WHERE v.peuple_id = $1 AND v.type = 'peuple' AND c.rang BETWEEN $2 AND $3`,
+      [peupleId, rangMin, rangMax]
+    );
+    return result.rows;
+  }
+
+  if (scope === 'propre_famille') {
+    const char = await pool.query(
+      `SELECT f.code FROM characters c JOIN rules_profils p ON p.id = c.profil_id
+       JOIN rules_familles f ON f.id = p.famille_id WHERE c.id = $1`,
+      [characterId]
+    );
+    if (!char.rows[0]?.code) return [];
+    return resolveEligibleCapacites(characterId, { ...effect, scope: 'familles', familles: [char.rows[0].code] });
+  }
+
+  const conditions = [`v.type = 'profil'`, 'c.rang BETWEEN $1 AND $2'];
+  const params = [rangMin, rangMax];
+  if (scope === 'profils') {
+    params.push(effect.profils);
+    conditions.push(`p.code = ANY($${params.length})`);
+  } else if (scope === 'familles') {
+    params.push(effect.familles);
+    conditions.push(`f.code = ANY($${params.length})`);
+  } else if (scope !== 'any') {
+    return [];
+  }
+
+  const result = await pool.query(
+    `SELECT c.id, c.name, c.rang, c.resume, c.description, c.est_sort,
+            v.id AS voie_id, v.name AS voie_name, p.name AS profil_name
+     FROM rules_capacites c JOIN rules_voies v ON v.id = c.voie_id
+     JOIN rules_profils p ON p.id = v.profil_id
+     LEFT JOIN rules_familles f ON f.id = p.famille_id
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY p.name, v.name, c.rang`,
+    params
+  );
+  return result.rows;
+}
+
 /**
  * GET /campaigns/:campaignId/characters
  */
@@ -717,6 +777,94 @@ router.put('/characters/:id/planned-voies', requireGm, async (req, res) => {
   } catch (error) {
     console.error('Error PUT /characters/:id/planned-voies:', error.message);
     res.status(500).json({ error: 'Erreur lors de la mise à jour des voies prévues' });
+  }
+});
+
+/**
+ * GET /characters/:id/capacite-choices/:capaciteId
+ * Lists what a "grant_capacite_choice" capacité the character already owns (e.g. Don étrange)
+ * currently lets them pick from. 400s if they don't own it yet or it grants no choice.
+ */
+router.get('/characters/:id/capacite-choices/:capaciteId', async (req, res) => {
+  try {
+    const existing = await pool.query('SELECT * FROM characters WHERE id = $1', [req.params.id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Personnage non trouvé' });
+    if (!(await canAccessCharacter(existing.rows[0], req.user))) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    const owned = await pool.query(
+      `SELECT c.effect FROM character_voies cv JOIN rules_capacites c ON c.voie_id = cv.voie_id AND c.rang <= cv.rang
+       WHERE cv.character_id = $1 AND c.id = $2`,
+      [req.params.id, req.params.capaciteId]
+    );
+    const effect = owned.rows[0]?.effect;
+    if (!effect || effect.type !== 'grant_capacite_choice') {
+      return res.status(400).json({ error: 'Cette capacité ne permet aucun choix' });
+    }
+
+    res.json(await resolveEligibleCapacites(req.params.id, effect));
+  } catch (error) {
+    console.error('Error GET /characters/:id/capacite-choices/:capaciteId:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * POST /characters/:id/capacite-choices
+ * Resolves a "grant_capacite_choice" capacité by picking one of its eligible options — free
+ * (no capacity point, any level: it's a side-effect of the granting capacité itself, not a
+ * normal voie purchase), owner or GM. Body: { granting_capacite_id, chosen_capacite_id },
+ * re-validated server-side against resolveEligibleCapacites rather than trusting the client.
+ */
+router.post('/characters/:id/capacite-choices', async (req, res) => {
+  try {
+    const existing = await pool.query('SELECT * FROM characters WHERE id = $1', [req.params.id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Personnage non trouvé' });
+    const character = existing.rows[0];
+    if (!(await canAccessCharacter(character, req.user))) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    const { granting_capacite_id: grantingId, chosen_capacite_id: chosenId } = req.body;
+    if (!grantingId || !chosenId) {
+      return res.status(400).json({ error: 'granting_capacite_id et chosen_capacite_id requis' });
+    }
+
+    const owned = await pool.query(
+      `SELECT c.effect FROM character_voies cv JOIN rules_capacites c ON c.voie_id = cv.voie_id AND c.rang <= cv.rang
+       WHERE cv.character_id = $1 AND c.id = $2`,
+      [req.params.id, grantingId]
+    );
+    const effect = owned.rows[0]?.effect;
+    if (!effect || effect.type !== 'grant_capacite_choice') {
+      return res.status(400).json({ error: 'Cette capacité ne permet aucun choix' });
+    }
+
+    const already = await pool.query(
+      'SELECT 1 FROM character_voies WHERE character_id = $1 AND nested_under_capacite_id = $2',
+      [req.params.id, grantingId]
+    );
+    if (already.rows.length > 0) {
+      return res.status(400).json({ error: 'Un choix a déjà été fait pour cette capacité' });
+    }
+
+    const eligible = await resolveEligibleCapacites(req.params.id, effect);
+    const chosen = eligible.find((c) => c.id === Number(chosenId));
+    if (!chosen) return res.status(400).json({ error: 'Choix invalide' });
+
+    await pool.query(
+      `INSERT INTO character_voies (character_id, voie_id, rang, obtained_at_level, only_capacite_id, nested_under_capacite_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (character_id, voie_id) DO NOTHING`,
+      [req.params.id, chosen.voie_id, chosen.rang, character.level, chosen.id, grantingId]
+    );
+
+    const updated = await recomputeAndPersist(req.params.id); // a borrowed spell can change pm_max
+    res.status(201).json(updated);
+  } catch (error) {
+    console.error('Error POST /characters/:id/capacite-choices:', error.message);
+    res.status(500).json({ error: 'Erreur lors du choix de capacité' });
   }
 });
 
