@@ -18,7 +18,7 @@ router.get('/familles', async (req, res) => {
 router.get('/profils', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT p.*, f.code AS famille_code, f.name AS famille_name
+      `SELECT p.*, f.code AS famille_code, f.name AS famille_name, f.pv_base
        FROM rules_profils p JOIN rules_familles f ON f.id = p.famille_id
        ORDER BY f.name, p.name`
     );
