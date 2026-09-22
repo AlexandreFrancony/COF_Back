@@ -75,7 +75,7 @@ export async function getCharacterWithVoies(characterId) {
 
   const voies = await pool.query(
     `SELECT cv.rang, cv.rang_cap, cv.obtained_at_level, cv.only_capacite_id, cv.nested_under_capacite_id,
-            v.id AS voie_id, v.code, v.name, v.type
+            v.id AS voie_id, v.code, v.name, v.type, v.icon
      FROM character_voies cv JOIN rules_voies v ON v.id = cv.voie_id
      WHERE cv.character_id = $1`,
     [characterId]
