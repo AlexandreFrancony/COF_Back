@@ -52,7 +52,7 @@ Les tables `rules_familles`, `rules_profils`, `rules_peuples`, `rules_voies`, `r
 | JWT_SECRET | Secret de signature JWT | - |
 | JWT_EXPIRES_IN | Durée de validité du token | 30d |
 | FRONTEND_URL | URL du frontend (CORS prod) | https://jdr.francony.fr |
-| SMTP_HOST / SMTP_PORT / SMTP_SECURE / SMTP_USER / SMTP_PASS / SMTP_FROM | Envoi d'email (mot de passe oublié) — mailbox OVH `tipsy@francony.fr`, partagée avec Bartending | - |
+| SMTP_HOST / SMTP_PORT / SMTP_SECURE / SMTP_USER / SMTP_PASS / SMTP_FROM | Envoi d'email (mot de passe oublié) — mailbox OVH `torgal@francony.fr` (depuis 2026-09-25, remplace `tipsy@`), partagée avec Tipsy et les emails de secours du ProDesk — expéditeur affiché « As I've Written » | - |
 | DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET / DISCORD_REDIRECT_URI | Connexion « Se connecter avec Discord » — application Discord **Torgal** (depuis 2026-09-25) | - |
 | BOT_API_TOKEN | Jeton partagé avec le bot Torgal pour `/bot/*` (en-tête `Authorization: Bot <jeton>`) ; absent = API bot désactivée (503) | - |
 

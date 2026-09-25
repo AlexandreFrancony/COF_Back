@@ -1,6 +1,6 @@
 // Login only for account creation — accounts are created via campaign invites (no open
 // registration). Password reset/change reuses the OVH SMTP mailbox already configured for
-// Bartending (tipsy@francony.fr) rather than provisioning a separate one for this project.
+// Bartending (torgal@francony.fr) rather than provisioning a separate one for this project.
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
@@ -225,7 +225,7 @@ router.post('/forgot-password', async (req, res) => {
     const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
 
     await transporter.sendMail({
-      from: process.env.SMTP_FROM || 'tipsy@francony.fr',
+      from: process.env.SMTP_FROM || "As I've Written <torgal@francony.fr>",
       to: user.email,
       subject: "📖 As I've Written — Réinitialisation de mot de passe",
       html: `
