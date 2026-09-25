@@ -22,6 +22,7 @@ import scenariosRouter from './routes/scenarios.js';
 import eventsRouter from './routes/events.js';
 import notesRouter from './routes/notes.js';
 import sseStreamsRouter from './routes/sseStreams.js';
+import botRouter from './routes/bot.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -77,6 +78,8 @@ app.get('/health', async (req, res) => {
 // instead of living inside board.js/notes.js each behind a local bypass — that pattern
 // silently breaks the moment more than one such router exists.
 app.use('/', sseStreamsRouter);
+// Same reason: the Torgal bot authenticates with its own token, not a user JWT
+app.use('/bot', botRouter);
 app.use('/auth', authLimiter, authRouter);
 app.use('/campaigns', campaignsRouter);
 app.use('/', invitesRouter); // mounts /campaigns/:id/invites and /invites/:token
