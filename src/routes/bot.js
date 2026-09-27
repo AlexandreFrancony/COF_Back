@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import pool from '../db/pool.js';
-import { canAccessCharacter, getCharacterWithVoies } from './characters.js';
+import { RESOURCES, adjustResource, canAccessCharacter, getCharacterWithVoies } from './characters.js';
 
 // Server-to-server API for Torgal, the Discord bot. Each call acts on behalf of the Discord
 // user who ran the command, with exactly that user's rights on the site: the user is resolved
@@ -83,6 +83,34 @@ router.get('/characters/:id', async (req, res) => {
     res.json({ ...character, ...names.rows[0], voies });
   } catch (error) {
     console.error('Error GET /bot/characters/:id:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * POST /bot/characters/:id/resources  { discord_id, resource: pv|pm|chance, delta }
+ * Adds delta (negative = loss) to the current value, clamped to [0, max]. Same access rule as
+ * reading the sheet: the owner or the campaign's GM; anything else answers 404.
+ */
+router.post('/characters/:id/resources', async (req, res) => {
+  try {
+    const { discord_id: discordId, resource, delta } = req.body || {};
+    const user = await findLinkedUser(discordId);
+    if (!user) return res.status(404).json({ error: 'not_linked' });
+    if (!/^\d+$/.test(req.params.id)) return res.status(404).json({ error: 'Personnage non trouvé' });
+    if (!Object.hasOwn(RESOURCES, resource) || !Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 999) {
+      return res.status(400).json({ error: 'resource pv|pm|chance et delta entier non nul attendus' });
+    }
+
+    const character = await pool.query('SELECT user_id, campaign_id FROM characters WHERE id = $1', [req.params.id]);
+    if (!character.rows[0] || !(await canAccessCharacter(character.rows[0], user))) {
+      return res.status(404).json({ error: 'Personnage non trouvé' });
+    }
+    const result = await adjustResource(req.params.id, resource, delta, user.display_name);
+    if (!result) return res.status(404).json({ error: 'Personnage non trouvé' });
+    res.json({ ...result, resource });
+  } catch (error) {
+    console.error('Error POST /bot/characters/:id/resources:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

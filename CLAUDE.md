@@ -63,6 +63,7 @@ Les tables `rules_familles`, `rules_profils`, `rules_peuples`, `rules_voies`, `r
 `/bot/*` est monté avant les routeurs `/` (même raison que `sseStreams.js`). Chaque appel agit au nom de l'utilisateur Discord qui a lancé la commande, avec exactement ses droits sur le site, retrouvé via `users.discord_id` (lié sur `/compte`).
 - `GET /bot/characters?discord_id=` — ses personnages + ceux des campagnes dont il est MJ (404 `not_linked` si aucun compte lié)
 - `GET /bot/characters/:id?discord_id=` — fiche en lecture seule (même règle d'accès que `GET /characters/:id`, 404 si non accessible)
+- `POST /bot/characters/:id/resources` `{ discord_id, resource: pv|pm|chance, delta }` — ajoute `delta` (négatif = perte) à la valeur actuelle, bornée à [0, max], ligne verrouillée (`adjustResource` dans `characters.js`) ; mêmes effets qu'une modif de fiche : historique (« … via Discord »), annonce 0 PV, rafraîchissement direct du plateau et de la fiche. Même règle d'accès (propriétaire ou MJ), sinon 404.
 
 ## Commandes
 

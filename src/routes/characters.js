@@ -179,6 +179,57 @@ async function applyPermanentCapaciteBonuses(characterId) {
   );
 }
 
+// Columns come from this map only, never from the request, so they're safe to interpolate.
+export const RESOURCES = {
+  pv: { current: 'pv_current', max: 'pv_max', label: 'PV', event: 'pv_change' },
+  pm: { current: 'pm_current', max: 'pm_max', label: 'PM', event: 'pm_change' },
+  chance: { current: 'points_chance_current', max: 'points_chance', label: 'Chance', event: 'chance_change' },
+};
+
+/**
+ * Adds delta to a character's current PV/PM/Chance, clamped to [0, max], with the same side
+ * effects as editing the sheet (history, 0 PV announcement, live board and sheet refresh).
+ * The row is locked for the read-modify-write so a Discord command and a sheet edit landing
+ * together can't overwrite each other. Returns { name, before, after, max }, or null.
+ */
+export async function adjustResource(characterId, resource, delta, actorName) {
+  const { current, max, label, event } = RESOURCES[resource];
+  const client = await pool.connect();
+  let row;
+  try {
+    await client.query('BEGIN');
+    const locked = await client.query(
+      `SELECT name, campaign_id, ${current} AS before, ${max} AS max FROM characters WHERE id = $1 FOR UPDATE`,
+      [characterId]
+    );
+    row = locked.rows[0];
+    if (!row) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    row.after = Math.min(Math.max(row.before + delta, 0), row.max);
+    await client.query(`UPDATE characters SET ${current} = $1 WHERE id = $2`, [row.after, characterId]);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  if (row.after !== row.before) {
+    const diff = row.after - row.before;
+    await logEvent(row.campaign_id, characterId, event,
+      `${row.name} : ${label} ${row.before} → ${row.after} (${diff > 0 ? '+' : ''}${diff}) — ${actorName} via Discord`);
+    if (resource === 'pv' && row.after === 0) {
+      await notifyCampaign(row.campaign_id, `💀 **${row.name}** tombe à terre (0 PV) !`);
+    }
+    await broadcastCharacterChange(row.campaign_id);
+    await broadcastCharacterSheet(characterId, await getCharacterWithVoies(characterId));
+  }
+  return { name: row.name, before: row.before, after: row.after, max: row.max };
+}
+
 async function recomputeAndPersist(characterId) {
   await applyPermanentCapaciteBonuses(characterId);
   const charResult = await pool.query('SELECT * FROM characters WHERE id = $1', [characterId]);
