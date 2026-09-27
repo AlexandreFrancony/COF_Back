@@ -35,7 +35,8 @@ async function findLinkedUser(discordId) {
 /**
  * GET /bot/characters?discord_id=
  * Characters that user can see: their own, plus every character of the campaigns they GM
- * (same visibility as the site). 404 not_linked if no account has this Discord ID.
+ * (same visibility as the site). 404 not_linked if no account has this Discord ID. Each comes with
+ * its owner's Discord ID and name, so voice commands can target a player by their Discord name.
  */
 router.get('/characters', async (req, res) => {
   try {
@@ -43,8 +44,9 @@ router.get('/characters', async (req, res) => {
     if (!user) return res.status(404).json({ error: 'not_linked' });
 
     const result = await pool.query(
-      `SELECT c.id, c.name, c.level, c.is_npc, k.name AS campaign_name, (c.user_id = $1) AS owned
-       FROM characters c JOIN campaigns k ON k.id = c.campaign_id
+      `SELECT c.id, c.name, c.level, c.is_npc, c.campaign_id, k.name AS campaign_name, (c.user_id = $1) AS owned,
+              o.discord_id AS owner_discord_id, o.display_name AS owner_name
+       FROM characters c JOIN campaigns k ON k.id = c.campaign_id LEFT JOIN users o ON o.id = c.user_id
        WHERE c.user_id = $1 OR ($2 AND k.gm_id = $1)
        ORDER BY (c.user_id = $1) DESC, k.name, c.name`,
       [user.id, user.role === 'gm']
