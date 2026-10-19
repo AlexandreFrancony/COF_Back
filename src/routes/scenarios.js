@@ -208,7 +208,7 @@ router.post('/scenarios/:id/tokens', requireGm, async (req, res) => {
     const visibleToPlayers = visible_to_players ?? (monstre_id == null);
     await pool.query(
       `INSERT INTO scenario_tokens (scenario_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id, monstre_id, hide_hp_from_players)
-       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6, 50), COALESCE($7, 50), $8, $9, $9, $10, $11, $12)`,
+       VALUES ($1, $2, $3, $4, COALESCE($5, '#c65d3b'), COALESCE($6::real, 50), COALESCE($7::real, 50), $8, $9, $9, $10, $11, $12)`,
       [req.params.id, character_id || null, label, image_url || null, color, x, y, visibleToPlayers, hp_max || null, owner_character_id || null, monstre_id || null, hideHp]
     );
 
@@ -296,7 +296,7 @@ router.post('/scenarios/:id/zones', requireGm, async (req, res) => {
 
     await pool.query(
       `INSERT INTO scenario_zones (scenario_id, shape, label, color, x, y, size, width, rotation, visible_to_players)
-       VALUES ($1, $2, $3, COALESCE($4, '#c65d3b'), COALESCE($5, 50), COALESCE($6, 50),
+       VALUES ($1, $2, $3, COALESCE($4, '#c65d3b'), COALESCE($5::real, 50), COALESCE($6::real, 50),
                COALESCE($7, 10), COALESCE($8, 10), COALESCE($9, 0), COALESCE($10, true))`,
       [req.params.id, shape, label || null, color, x, y, size, width, rotation, visible_to_players]
     );
