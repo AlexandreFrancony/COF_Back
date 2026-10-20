@@ -4,6 +4,7 @@ import { authenticateToken, requireGm } from '../middleware/auth.js';
 import { getFullBoard, buildBoardForRole, getOrCreateBoard } from './board.js';
 import { broadcastBoard } from '../services/boardStream.js';
 import { TOKEN_ENRICHMENT_COLUMNS, TOKEN_ENRICHMENT_JOINS } from '../services/tokenEnrichment.js';
+import { rememberActiveScene, clearScene, getSceneMemory, restoreScene } from '../services/sceneMemory.js';
 
 const router = Router();
 // requireGm is applied per-route (not blanket) — this router is mounted at '/' alongside
@@ -90,7 +91,8 @@ router.get('/campaigns/:campaignId/scenarios', requireGm, async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT s.*, m.url AS background_url, m.type AS background_type
+      `SELECT s.*, m.url AS background_url, m.type AS background_type,
+              EXISTS (SELECT 1 FROM board_scene_memories bm WHERE bm.scenario_id = s.id) AS remembered
        FROM campaign_scenarios s
        LEFT JOIN board_media m ON m.id = s.background_media_id
        WHERE s.campaign_id = $1 ORDER BY s.created_at`,
@@ -362,61 +364,127 @@ router.delete('/scenario-zones/:id', requireGm, async (req, res) => {
 });
 
 /**
- * POST /scenarios/:id/launch — applies whatever the scenario actually customized (background,
- * grid, token size) and adds its prepared tokens/zones to the campaign's live board. Additive
- * only for tokens/zones: nothing already on the board is ever cleared or replaced. Background/
- * grid/token size are the scenario's own settings, but each only overrides the live board when
- * it was actually set here — grid_visible/grid_size/token_size are NULL until the GM touches
- * those controls for this scenario, specifically so launching an otherwise-untouched scenario
- * can't silently reset the live board's grid to hidden or its token size back to 40.
+ * Applies whatever the scenario actually customized (background, grid, token size) to the live
+ * board and adds its prepared tokens/zones. Additive only: nothing already on the board is cleared.
+ * Background/grid/token size each only override the live board when actually set here —
+ * grid_visible/grid_size/token_size are NULL until the GM touches those controls for this
+ * scenario, so launching an otherwise-untouched scenario can't silently reset the live board's
+ * grid to hidden or its token size back to 40. A prepared character already on the board is
+ * moved to its prepared spot instead of getting a second pawn.
+ */
+async function applyScenarioPrep(db, scenarioId, boardId) {
+  const [full] = await enrichScenarios([await getScenarioRow(scenarioId)]);
+
+  await db.query(
+    `UPDATE board_states SET
+       background_url = CASE WHEN $1::int IS NOT NULL THEN $2 ELSE background_url END,
+       background_type = CASE WHEN $1::int IS NOT NULL THEN $3 ELSE background_type END,
+       grid_visible = COALESCE($4, grid_visible),
+       grid_size = COALESCE($5, grid_size),
+       token_size = COALESCE($6, token_size),
+       labels_visible = COALESCE($8, labels_visible)
+     WHERE id = $7`,
+    [
+      full.background_media_id, full.background_url, full.background_type,
+      full.grid_visible, full.grid_size, full.token_size,
+      boardId, full.labels_visible,
+    ]
+  );
+
+  let tokensAdded = 0;
+  for (const t of full.tokens) {
+    if (t.character_id) {
+      const moved = await db.query(
+        'UPDATE board_tokens SET x = $3, y = $4 WHERE board_state_id = $1 AND character_id = $2',
+        [boardId, t.character_id, t.x, t.y]
+      );
+      if (moved.rowCount > 0) continue;
+    }
+    await db.query(
+      `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id, monstre_id, hide_hp_from_players, player_hp_label)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+      [boardId, t.character_id, t.label, t.image_url, t.color, t.x, t.y, t.visible_to_players, t.hp_current, t.hp_max, t.owner_character_id, t.monstre_id, t.hide_hp_from_players, t.player_hp_label]
+    );
+    tokensAdded++;
+  }
+
+  for (const z of full.zones) {
+    await db.query(
+      `INSERT INTO board_zones (board_state_id, shape, label, color, x, y, size, width, rotation, visible_to_players)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [boardId, z.shape, z.label, z.color, z.x, z.y, z.size, z.width, z.rotation, z.visible_to_players]
+    );
+  }
+
+  return { tokens_added: tokensAdded, zones_added: full.zones.length };
+}
+
+/**
+ * POST /scenarios/:id/launch — adds the scenario to whatever is on the board (see applyScenarioPrep).
  */
 router.post('/scenarios/:id/launch', requireGm, async (req, res) => {
   try {
     const scenario = await ownedScenario(req.params.id, req.user.id);
     if (!scenario) return res.status(404).json({ error: 'Scénario non trouvé' });
 
-    const [full] = await enrichScenarios([await getScenarioRow(req.params.id)]);
-
     const board = await getOrCreateBoard(scenario.campaign_id);
-
-    await pool.query(
-      `UPDATE board_states SET
-         background_url = CASE WHEN $1::int IS NOT NULL THEN $2 ELSE background_url END,
-         background_type = CASE WHEN $1::int IS NOT NULL THEN $3 ELSE background_type END,
-         grid_visible = COALESCE($4, grid_visible),
-         grid_size = COALESCE($5, grid_size),
-         token_size = COALESCE($6, token_size),
-         labels_visible = COALESCE($8, labels_visible)
-       WHERE id = $7`,
-      [
-        full.background_media_id, full.background_url, full.background_type,
-        full.grid_visible, full.grid_size, full.token_size,
-        board.id, full.labels_visible,
-      ]
-    );
-
-    for (const t of full.tokens) {
-      await pool.query(
-        `INSERT INTO board_tokens (board_state_id, character_id, label, image_url, color, x, y, visible_to_players, hp_current, hp_max, owner_character_id, monstre_id, hide_hp_from_players, player_hp_label)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-        [board.id, t.character_id, t.label, t.image_url, t.color, t.x, t.y, t.visible_to_players, t.hp_current, t.hp_max, t.owner_character_id, t.monstre_id, t.hide_hp_from_players, t.player_hp_label]
-      );
-    }
-
-    for (const z of full.zones) {
-      await pool.query(
-        `INSERT INTO board_zones (board_state_id, shape, label, color, x, y, size, width, rotation, visible_to_players)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [board.id, z.shape, z.label, z.color, z.x, z.y, z.size, z.width, z.rotation, z.visible_to_players]
-      );
-    }
+    const added = await applyScenarioPrep(pool, req.params.id, board.id);
 
     const fullBoard = await getFullBoard(scenario.campaign_id);
     broadcastBoard(scenario.campaign_id, fullBoard, buildBoardForRole);
-    res.json({ message: 'Scénario lancé', tokens_added: full.tokens.length, zones_added: full.zones.length });
+    res.json({ message: 'Scénario lancé', ...added });
   } catch (error) {
     console.error('Error POST /scenarios/:id/launch:', error.message);
     res.status(500).json({ error: 'Erreur lors du lancement du scénario' });
+  }
+});
+
+/**
+ * POST /scenarios/:id/switch — moves the group to this scene. The scene being left is remembered
+ * (see services/sceneMemory.js), then this one comes back as it was left, or from its prep on a
+ * first visit. The PJ and their creatures stay on the board throughout.
+ */
+router.post('/scenarios/:id/switch', requireGm, async (req, res) => {
+  let client;
+  try {
+    const scenario = await ownedScenario(req.params.id, req.user.id);
+    if (!scenario) return res.status(404).json({ error: 'Scénario non trouvé' });
+
+    const board = await getOrCreateBoard(scenario.campaign_id);
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await rememberActiveScene(client, board.id);
+    await clearScene(client, board.id, scenario.id);
+    const memory = await getSceneMemory(client, board.id, scenario.id);
+    if (memory) await restoreScene(client, board.id, memory);
+    else await applyScenarioPrep(client, scenario.id, board.id);
+    await client.query('COMMIT');
+
+    const fullBoard = await getFullBoard(scenario.campaign_id);
+    broadcastBoard(scenario.campaign_id, fullBoard, buildBoardForRole);
+    res.json({ restored: Boolean(memory) });
+  } catch (error) {
+    await client?.query('ROLLBACK').catch(() => {});
+    console.error('Error POST /scenarios/:id/switch:', error.message);
+    res.status(500).json({ error: 'Erreur lors du changement de scène' });
+  } finally {
+    client?.release();
+  }
+});
+
+/**
+ * DELETE /scenarios/:id/memory — forgets how the scene was left: next visit starts from its prep.
+ */
+router.delete('/scenarios/:id/memory', requireGm, async (req, res) => {
+  try {
+    const scenario = await ownedScenario(req.params.id, req.user.id);
+    if (!scenario) return res.status(404).json({ error: 'Scénario non trouvé' });
+
+    await pool.query('DELETE FROM board_scene_memories WHERE scenario_id = $1', [scenario.id]);
+    res.json({ message: 'Scène remise à sa préparation' });
+  } catch (error) {
+    console.error('Error DELETE /scenarios/:id/memory:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 

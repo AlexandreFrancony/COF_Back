@@ -6,6 +6,7 @@ import { broadcastBoard, broadcastPing } from '../services/boardStream.js';
 import { TOKEN_ENRICHMENT_COLUMNS, TOKEN_ENRICHMENT_JOINS } from '../services/tokenEnrichment.js';
 import { upload } from '../services/uploads.js';
 import { logEvent } from '../services/eventLog.js';
+import { rememberActiveScene, clearScene } from '../services/sceneMemory.js';
 
 // Board-level events log with no single character to attach to (session_events.character_id
 // is nullable exactly for this) — a friendly name for whatever board_media URL the GM just
@@ -400,34 +401,35 @@ router.delete('/campaigns/:campaignId/board/drawings', requireGm, async (req, re
 });
 
 /**
- * POST /campaigns/:campaignId/board/new-scene — GM only. Clears everything specific to the
- * current location (tokens, zones, fog, drawings, handout, initiative) in one call instead of
- * deleting a dozen things by hand between locations. Deliberately leaves the room setup alone —
- * background/music/camera framing/grid are picked separately, not implied by "new scene".
+ * POST /campaigns/:campaignId/board/new-scene — GM only. An empty place for the group: the scene
+ * being left is remembered (services/sceneMemory.js), then everything specific to it goes (pawns
+ * other than the PJ and their creatures, zones, fog, drawings, handout, initiative) in one call
+ * instead of deleting a dozen things by hand between locations. Deliberately leaves the room setup
+ * alone — background/music/camera framing/grid are picked separately, not implied by "new scene".
  */
 router.post('/campaigns/:campaignId/board/new-scene', requireGm, async (req, res) => {
+  let client;
   try {
     const campaign = await findAccessibleCampaign(req.params.campaignId, req.user);
     if (!campaign) return res.status(404).json({ error: 'Campagne non trouvée' });
 
     const board = await getOrCreateBoard(req.params.campaignId);
-    await pool.query('DELETE FROM board_tokens WHERE board_state_id = $1', [board.id]);
-    await pool.query('DELETE FROM board_zones WHERE board_state_id = $1', [board.id]);
-    await pool.query(
-      `UPDATE board_states SET
-         fog_enabled = false, fog_revealed = '[]', drawings = '[]', handout_url = NULL,
-         initiative_current_token_id = NULL, initiative_round = 1
-       WHERE id = $1`,
-      [board.id]
-    );
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await rememberActiveScene(client, board.id);
+    await clearScene(client, board.id, null);
+    await client.query('COMMIT');
 
     const fullBoard = await getFullBoard(req.params.campaignId);
     broadcastBoard(req.params.campaignId, fullBoard, buildBoardForRole);
     res.json(fullBoard);
     logEvent(req.params.campaignId, null, 'scene_reset', 'Nouvelle scène');
   } catch (error) {
+    await client?.query('ROLLBACK').catch(() => {});
     console.error('Error POST board new-scene:', error.message);
     res.status(500).json({ error: 'Erreur serveur' });
+  } finally {
+    client?.release();
   }
 });
 

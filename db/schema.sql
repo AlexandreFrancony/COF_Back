@@ -590,3 +590,16 @@ CREATE TRIGGER trigger_board_states_updated_at
     BEFORE UPDATE ON board_states
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();
+
+-- Scene memory: which prepared scene the live board currently shows, and what each scene looked
+-- like when the GM last left it. Going back to a scene restores that snapshot (pawns, zones, fog,
+-- drawings, background) instead of relaunching its prep; the PJ and their creatures never leave
+-- the board, they only get back the spot they had in that scene. See services/sceneMemory.js.
+ALTER TABLE board_states ADD COLUMN IF NOT EXISTS active_scenario_id INTEGER REFERENCES campaign_scenarios(id) ON DELETE SET NULL;
+CREATE TABLE IF NOT EXISTS board_scene_memories (
+    board_state_id INTEGER NOT NULL REFERENCES board_states(id) ON DELETE CASCADE,
+    scenario_id INTEGER NOT NULL REFERENCES campaign_scenarios(id) ON DELETE CASCADE,
+    snapshot JSONB NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (board_state_id, scenario_id)
+);
