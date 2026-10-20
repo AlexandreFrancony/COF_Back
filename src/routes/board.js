@@ -537,6 +537,60 @@ router.patch('/board/tokens/:tokenId', requireGm, async (req, res) => {
 });
 
 /**
+ * PATCH /board/tokens/:tokenId/player — a player moving what's theirs on the board.
+ * Body: { x, y, hp_delta }. Allowed: their own character's pawn (position only — a character's
+ * PV live on its sheet), and a creature they own through owner_character_id (a golem, a
+ * familiar: position and its own PV). Kept apart from the GM route on purpose so nothing a
+ * player sends can ever reach visibility, labels, images or someone else's pawn.
+ */
+router.patch('/board/tokens/:tokenId/player', async (req, res) => {
+  try {
+    const found = await pool.query(
+      `SELECT bt.id, bt.visible_to_players, bs.campaign_id,
+              own.user_id AS own_user_id, pet.user_id AS owner_user_id
+       FROM board_tokens bt
+       JOIN board_states bs ON bs.id = bt.board_state_id
+       LEFT JOIN characters own ON own.id = bt.character_id
+       LEFT JOIN characters pet ON pet.id = bt.owner_character_id
+       WHERE bt.id = $1`,
+      [req.params.tokenId]
+    );
+    const token = found.rows[0];
+    if (!token || !token.visible_to_players) return res.status(404).json({ error: 'Pion non trouvé' });
+    const ownPawn = token.own_user_id === req.user.id;
+    const ownCreature = token.owner_user_id === req.user.id;
+    if (!ownPawn && !ownCreature) return res.status(403).json({ error: "Ce pion n'est pas à toi" });
+
+    const { x, y, hp_delta } = req.body;
+    const position = (v) => v == null || (Number.isFinite(v) && v >= 0 && v <= 100);
+    if (!position(x) || !position(y)) return res.status(400).json({ error: 'Position invalide' });
+    if (hp_delta != null && (!ownCreature || !Number.isInteger(hp_delta) || Math.abs(hp_delta) > 999)) {
+      return res.status(400).json({ error: 'Seuls les PV de tes créatures peuvent changer ici' });
+    }
+
+    await pool.query(
+      `UPDATE board_tokens SET
+         x = COALESCE($2::real, x),
+         y = COALESCE($3::real, y),
+         hp_current = CASE
+           WHEN hp_max IS NOT NULL AND $4::int IS NOT NULL
+             THEN LEAST(hp_max, GREATEST(0, hp_current + $4))
+           ELSE hp_current
+         END
+       WHERE id = $1`,
+      [req.params.tokenId, x ?? null, y ?? null, hp_delta ?? null]
+    );
+
+    const fullBoard = await getFullBoard(token.campaign_id);
+    broadcastBoard(token.campaign_id, fullBoard, buildBoardForRole);
+    res.json(buildBoardForRole(fullBoard, 'player'));
+  } catch (error) {
+    console.error('Error PATCH own board token:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+/**
  * POST /campaigns/:campaignId/board/zones — GM only
  * Body: { shape ('circle'|'rectangle'|'cone'), label, color, x, y, size, width, rotation, visible_to_players }
  */
