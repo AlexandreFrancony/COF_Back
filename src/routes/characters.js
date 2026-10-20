@@ -712,6 +712,12 @@ router.patch('/characters/:id', async (req, res) => {
   }
 });
 
+// A prestige voie's capacités are numbered from its opening rang (4..8, or 3..7 for the familier fantastique)
+async function prestigeStartRang(voieId) {
+  const result = await pool.query('SELECT min(rang) AS rang FROM rules_capacites WHERE voie_id = $1', [voieId]);
+  return result.rows[0]?.rang ?? 4;
+}
+
 /**
  * POST /characters/:id/voies
  * Assigns a voie to a character.
@@ -727,8 +733,9 @@ router.patch('/characters/:id', async (req, res) => {
  * A type='profil' voie whose profil_id differs from the character's own is a profil hybride
  * pick (p.176) — allowed only while at least one of the principal profil's 5 voies is still
  * completely untouched.
- * A type='prestige' voie opens directly at rang 4 for 2 points, gated on
- * niveau_prestige_requis and limited to one per career (p.39).
+ * A type='prestige' voie opens directly at its first capacité's rang (4, or 3 for the Voie du
+ * familier fantastique) for 2 points, gated on niveau_prestige_requis and limited to one per
+ * career (p.39).
  */
 router.post('/characters/:id/voies', async (req, res) => {
   try {
@@ -789,8 +796,8 @@ router.post('/characters/:id/voies', async (req, res) => {
         }
       }
 
-      // A prestige voie opens directly at rang 4 (not rang 1) and costs the rang 3+ price
-      // (2 points) — one per career (p.39), gated on the character's own niveau_prestige_requis.
+      // A prestige voie opens directly at its first capacité's rang (not rang 1) and costs the
+      // rang 3+ price (2 points) — one per career (p.39), gated on niveau_prestige_requis.
       if (voie?.type === 'prestige') {
         if (character.level < voie.niveau_prestige_requis) {
           return res.status(400).json({
@@ -805,7 +812,7 @@ router.post('/characters/:id/voies', async (req, res) => {
         if (existingPrestige.rows.length > 0) {
           return res.status(400).json({ error: 'Une seule voie de prestige est possible par carrière' });
         }
-        grantedRang = 4;
+        grantedRang = await prestigeStartRang(voie_id);
         cost = 2;
       }
 
@@ -1015,9 +1022,23 @@ router.patch('/characters/:id/voies/:voieId', async (req, res) => {
     }
 
     const newRang = current.rows[0].rang + 1;
-    const niveauRequis = NIVEAU_REQUIS_PAR_RANG[newRang];
+    let niveauRequis = NIVEAU_REQUIS_PAR_RANG[newRang];
     if (!niveauRequis) {
       return res.status(400).json({ error: 'Rang maximal déjà atteint' });
+    }
+    const voieRules = await pool.query(
+      'SELECT type, niveau_prestige_requis FROM rules_voies WHERE id = $1', [req.params.voieId]
+    );
+    if (voieRules.rows[0]?.type === 'prestige') {
+      // A prestige voie opening later than the usual level 5 shifts its next rangs too: +2 levels a rang (p.39)
+      const startRang = await prestigeStartRang(req.params.voieId);
+      niveauRequis = Math.max(niveauRequis, voieRules.rows[0].niveau_prestige_requis + 2 * (newRang - startRang));
+      const capacite = await pool.query(
+        'SELECT 1 FROM rules_capacites WHERE voie_id = $1 AND rang = $2', [req.params.voieId, newRang]
+      );
+      if (capacite.rows.length === 0) {
+        return res.status(400).json({ error: 'Rang maximal déjà atteint' });
+      }
     }
     if (character.level < niveauRequis) {
       return res.status(400).json({ error: `Niveau ${niveauRequis} requis pour ce rang` });
