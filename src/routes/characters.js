@@ -829,6 +829,25 @@ router.post('/characters/:id/voies', async (req, res) => {
       [req.params.id, voie_id, grantedRang, rang_cap, obtained_at_level, only_capacite_id, nested_under_capacite_id]
     );
 
+    // A player's own off-profil or homebrew pick at creation is allowed, but flagged for the GM
+    if (!spend_points && !isGm && result.rows.length > 0) {
+      const picked = await pool.query(
+        `SELECT v.name, v.type, v.profil_id, p.name AS profil_name FROM rules_voies v
+         LEFT JOIN rules_profils p ON p.id = v.profil_id WHERE v.id = $1`,
+        [voie_id]
+      );
+      const v = picked.rows[0];
+      const note = v?.type === 'custom' ? `voie homebrew ${v.name}`
+        : v?.type === 'profil' && v.profil_id !== character.profil_id ? `voie hybride ${v.name} (${v.profil_name})`
+        : null;
+      if (note) {
+        await pool.query(
+          `UPDATE characters SET gm_review = COALESCE(gm_review || ', ', 'Choisi à la création : ') || $1 WHERE id = $2`,
+          [note, req.params.id]
+        );
+      }
+    }
+
     if (spend_points && result.rows.length > 0) {
       await pool.query(
         'UPDATE characters SET capacity_points_available = capacity_points_available - $1 WHERE id = $2',
@@ -845,6 +864,23 @@ router.post('/characters/:id/voies', async (req, res) => {
   } catch (error) {
     console.error('Error POST /characters/:id/voies:', error.message);
     res.status(500).json({ error: 'Erreur lors de l\'ajout de la voie' });
+  }
+});
+
+/**
+ * DELETE /characters/:id/gm-review — GM only: the character has been looked at and validated.
+ */
+router.delete('/characters/:id/gm-review', requireGm, async (req, res) => {
+  try {
+    const existing = await pool.query('SELECT * FROM characters WHERE id = $1', [req.params.id]);
+    if (existing.rows.length === 0 || !(await canAccessCharacter(existing.rows[0], req.user))) {
+      return res.status(404).json({ error: 'Personnage non trouvé' });
+    }
+    await pool.query('UPDATE characters SET gm_review = NULL WHERE id = $1', [req.params.id]);
+    res.json({ message: 'Personnage validé' });
+  } catch (error) {
+    console.error('Error DELETE /characters/:id/gm-review:', error.message);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 

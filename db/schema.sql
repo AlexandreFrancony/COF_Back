@@ -603,3 +603,8 @@ CREATE TABLE IF NOT EXISTS board_scene_memories (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (board_state_id, scenario_id)
 );
+
+-- What the GM still has to look at on a character a player built: set when a player takes a voie
+-- outside their profil (hybride) or a homebrew voie at creation, an exception only the GM used to
+-- be able to make. NULL = nothing to review; the GM clears it once they've validated the character.
+ALTER TABLE characters ADD COLUMN IF NOT EXISTS gm_review TEXT;
