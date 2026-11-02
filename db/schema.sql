@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS users (
     discord_avatar_hash VARCHAR(64),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+-- The display name doubles as a login (POST /auth/login), so it must be unique, case-insensitively
+CREATE UNIQUE INDEX IF NOT EXISTS users_display_name_lower_key ON users (LOWER(display_name));
 
 CREATE TABLE IF NOT EXISTS campaigns (
     id SERIAL PRIMARY KEY,

@@ -233,6 +233,9 @@ router.post('/invites/:token/accept', async (req, res) => {
       token,
     });
   } catch (error) {
+    if (error.constraint === 'users_display_name_lower_key') {
+      return res.status(409).json({ error: 'Ce pseudo est déjà pris' });
+    }
     console.error('Error POST /invites/:token/accept:', error.message);
     res.status(500).json({ error: 'Erreur lors de l\'acceptation de l\'invitation' });
   }

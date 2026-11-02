@@ -51,20 +51,21 @@ const transporter = nodemailer.createTransport({
 
 /**
  * POST /auth/login
- * Body: { email, password }
+ * Body: { email, password } — `email` also accepts the display name (unique, see schema.sql)
  */
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ error: 'Email et mot de passe requis' });
+      return res.status(400).json({ error: 'Email ou pseudo et mot de passe requis' });
     }
 
     const result = await pool.query(
       `SELECT id, email, display_name, password_hash, role, discord_id, discord_username, discord_avatar_hash
-       FROM users WHERE LOWER(email) = LOWER($1)`,
-      [email]
+       FROM users WHERE LOWER(email) = LOWER($1) OR LOWER(display_name) = LOWER($1)
+       ORDER BY LOWER(email) = LOWER($1) DESC LIMIT 1`,
+      [email.trim()]
     );
 
     if (result.rows.length === 0) {
@@ -150,6 +151,9 @@ router.patch('/display-name', authenticateToken, async (req, res) => {
 
     res.json({ user, token: generateToken(user) });
   } catch (error) {
+    if (error.constraint === 'users_display_name_lower_key') {
+      return res.status(409).json({ error: 'Ce pseudo est déjà pris' });
+    }
     console.error('Error PATCH /auth/display-name:', error.message);
     res.status(500).json({ error: "Erreur lors du changement de nom" });
   }
@@ -400,11 +404,16 @@ router.get('/discord/callback', async (req, res) => {
           // No password will ever be used to log into this account (Discord is the only way
           // in), but password_hash is NOT NULL — fill it with an unguessable value nobody knows.
           const unusedHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), BCRYPT_ROUNDS);
+          // Display names are unique (they double as logins): someone may already be called that here
+          const taken = (await pool.query(
+            'SELECT 1 FROM users WHERE LOWER(display_name) = LOWER($1)', [discordUser.username]
+          )).rowCount > 0;
+          const displayName = taken ? `${discordUser.username}-${discordUser.id.slice(-4)}` : discordUser.username;
           user = (await pool.query(
             `INSERT INTO users (email, password_hash, display_name, role, discord_id, discord_username, discord_avatar_hash)
              VALUES ($1, $2, $3, 'player', $4, $5, $6)
              RETURNING *`,
-            [discordUser.email, unusedHash, discordUser.username, discordUser.id, discordUser.username, discordUser.avatar]
+            [discordUser.email, unusedHash, displayName, discordUser.id, discordUser.username, discordUser.avatar]
           )).rows[0];
         }
       }
