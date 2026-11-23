@@ -12,6 +12,7 @@ import { notifyCampaign } from '../services/discordWebhook.js';
 import { hasSubscribers, broadcastBoard } from '../services/boardStream.js';
 import { getFullBoard, buildBoardForRole } from './board.js';
 import { hasSubscribers as hasCharacterSubscribers, broadcastCharacter } from '../services/characterStream.js';
+import { FACETTE_VOIE_IDS, facettePayment } from '../services/facettes.js';
 
 const router = Router();
 router.use(authenticateToken);
@@ -259,8 +260,7 @@ async function recomputeAndPersist(characterId) {
   // shape change for every other character, who has nothing in either group). Voie des artefacts
   // (76) and Voie de transition (139) are common to both facettes — deliberately absent from
   // both lists so the "shared" bucket (neither list) picks them up automatically.
-  const FACETTE_CALME_VOIE_IDS = [78, 80];
-  const FACETTE_MAGE_VOIE_IDS = [82, 83];
+  const { calme: FACETTE_CALME_VOIE_IDS, mage: FACETTE_MAGE_VOIE_IDS } = FACETTE_VOIE_IDS;
   let sortsCountValue;
   if (character.custom_data?.threshold_percent != null) {
     const perFacette = await pool.query(
@@ -773,6 +773,7 @@ router.post('/characters/:id/voies', async (req, res) => {
     let grantedRang = 1;
     if (!spend_points) grantedRang = isGm ? rang : (rang === 2 ? 2 : 1);
     let cost = 1;
+    let payment = null;
 
     if (spend_points) {
       const voieRow = await pool.query(
@@ -816,8 +817,9 @@ router.post('/characters/:id/voies', async (req, res) => {
         cost = 2;
       }
 
-      if (character.capacity_points_available < cost) {
-        return res.status(400).json({ error: `Pas assez de points de capacité (${cost} requis)` });
+      payment = facettePayment(character, voie_id, cost);
+      if (character.capacity_points_available < payment.regular) {
+        return res.status(400).json({ error: `Pas assez de points de capacité (${payment.regular} requis)` });
       }
     }
 
@@ -850,8 +852,9 @@ router.post('/characters/:id/voies', async (req, res) => {
 
     if (spend_points && result.rows.length > 0) {
       await pool.query(
-        'UPDATE characters SET capacity_points_available = capacity_points_available - $1 WHERE id = $2',
-        [cost, req.params.id]
+        `UPDATE characters SET capacity_points_available = capacity_points_available - $1,
+           custom_data = COALESCE($3::jsonb, custom_data) WHERE id = $2`,
+        [payment.regular, req.params.id, payment.customData ? JSON.stringify(payment.customData) : null]
       );
       await recordVoieFamilyForLeveling(req.params.id, voie_id);
       await maybeFinalizeLevelPv(req.params.id);
@@ -1081,8 +1084,9 @@ router.patch('/characters/:id/voies/:voieId', async (req, res) => {
     }
 
     const cost = newRang <= 2 ? 1 : 2;
-    if (character.capacity_points_available < cost) {
-      return res.status(400).json({ error: `Pas assez de points de capacité (${cost} requis)` });
+    const { regular, customData } = facettePayment(character, req.params.voieId, cost);
+    if (character.capacity_points_available < regular) {
+      return res.status(400).json({ error: `Pas assez de points de capacité (${regular} requis)` });
     }
 
     await pool.query(
@@ -1090,8 +1094,9 @@ router.patch('/characters/:id/voies/:voieId', async (req, res) => {
       [newRang, req.params.id, req.params.voieId]
     );
     await pool.query(
-      'UPDATE characters SET capacity_points_available = capacity_points_available - $1 WHERE id = $2',
-      [cost, req.params.id]
+      `UPDATE characters SET capacity_points_available = capacity_points_available - $1,
+         custom_data = COALESCE($3::jsonb, custom_data) WHERE id = $2`,
+      [regular, req.params.id, customData ? JSON.stringify(customData) : null]
     );
     await recordVoieFamilyForLeveling(req.params.id, req.params.voieId);
     await maybeFinalizeLevelPv(req.params.id);
